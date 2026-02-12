@@ -1,24 +1,42 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
-import { mockApi, BookingData } from '../../../services/mockApi';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { db } from '../../../lib/firebase';
 
 export default function BookingsList() {
-    const [bookings, setBookings] = useState<BookingData[]>([]);
+    const [bookings, setBookings] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
     const router = useRouter();
 
     useEffect(() => {
-        mockApi.getBookings().then(setBookings);
+        const fetchBookings = async () => {
+            try {
+                const q = query(collection(db, 'bookings'), orderBy('createdAt', 'desc'));
+                const querySnapshot = await getDocs(q);
+                const bookingsList = querySnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                setBookings(bookingsList);
+            } catch (error) {
+                console.error("Error fetching bookings:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchBookings();
     }, []);
 
-    const renderItem = ({ item }: { item: BookingData }) => (
+    const renderItem = ({ item }: { item: any }) => (
         <TouchableOpacity style={styles.card} onPress={() => router.push(`/(admin)/bookings/${item.id}` as any)}>
             <View style={styles.header}>
                 <Text style={styles.playerName}>{item.playerName}</Text>
                 <View style={[styles.statusBadge, { backgroundColor: item.status === 'confirmed' ? '#e1f7ec' : '#fef4e5' }]}>
                     <Text style={[styles.statusText, { color: item.status === 'confirmed' ? '#1cc88a' : '#f6c23e' }]}>
-                        {item.status.toUpperCase()}
+                        {(item.status || 'pending').toUpperCase()}
                     </Text>
                 </View>
             </View>

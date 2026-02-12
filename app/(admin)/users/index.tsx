@@ -1,23 +1,47 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, Alert } from 'react-native';
-import { mockApi, UserData } from '../../../services/mockApi';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { collection, getDocs, query, deleteDoc, doc } from 'firebase/firestore';
+import { db } from '../../../lib/firebase';
 
 export default function UsersList() {
-    const [users, setUsers] = useState<UserData[]>([]);
+    const [users, setUsers] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
     const router = useRouter();
 
     useEffect(() => {
-        mockApi.getUsers().then(setUsers);
+        const fetchUsers = async () => {
+            try {
+                const querySnapshot = await getDocs(collection(db, 'users'));
+                const usersList = querySnapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                }));
+                setUsers(usersList);
+            } catch (error) {
+                console.error("Error fetching users:", error);
+                Alert.alert("Error", "Failed to fetch users");
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchUsers();
     }, []);
 
     const handleDelete = (id: string) => {
         Alert.alert("Confirm Delete", "Are you sure you want to delete this user?", [
             { text: "Cancel", style: "cancel" },
             {
-                text: "Delete", style: "destructive", onPress: () => {
-                    setUsers(users.filter(u => u.id !== id));
+                text: "Delete", style: "destructive", onPress: async () => {
+                    try {
+                        await deleteDoc(doc(db, 'users', id));
+                        setUsers(users.filter(u => u.id !== id));
+                    } catch (error) {
+                        console.error("Error deleting user:", error);
+                        Alert.alert("Error", "Failed to delete user");
+                    }
                 }
             }
         ]);
@@ -32,26 +56,29 @@ export default function UsersList() {
         );
     };
 
-    const renderItem = ({ item }: { item: UserData }) => (
-        <View style={styles.userItem}>
-            <View style={styles.userInfo}>
-                <Text style={styles.userName}>{item.name}</Text>
-                <Text style={styles.userEmail}>{item.email}</Text>
-                <View style={styles.roleRow}>
-                    <Text style={styles.userRole}>{item.role}</Text>
-                    <StatusBadge status={item.status} />
+    const renderItem = ({ item }: { item: any }) => {
+        const displayName = item.name || `${item.firstName || ''} ${item.lastName || ''}`.trim() || 'Unknown User';
+        return (
+            <View style={styles.userItem}>
+                <View style={styles.userInfo}>
+                    <Text style={styles.userName}>{displayName}</Text>
+                    <Text style={styles.userEmail}>{item.email || 'No email'}</Text>
+                    <View style={styles.roleRow}>
+                        <Text style={styles.userRole}>{item.role || 'No role'}</Text>
+                        <StatusBadge status={item.status || 'pending'} />
+                    </View>
+                </View>
+                <View style={styles.actions}>
+                    <TouchableOpacity onPress={() => router.push(`/(admin)/users/${item.id}`)} style={styles.actionBtn}>
+                        <Ionicons name="eye" size={20} color="#4e73df" />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDelete(item.id)} style={styles.actionBtn}>
+                        <Ionicons name="trash" size={20} color="#e74a3b" />
+                    </TouchableOpacity>
                 </View>
             </View>
-            <View style={styles.actions}>
-                <TouchableOpacity onPress={() => router.push(`/(admin)/users/${item.id}`)} style={styles.actionBtn}>
-                    <Ionicons name="eye" size={20} color="#4e73df" />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDelete(item.id)} style={styles.actionBtn}>
-                    <Ionicons name="trash" size={20} color="#e74a3b" />
-                </TouchableOpacity>
-            </View>
-        </View>
-    );
+        );
+    };
 
     return (
         <View style={styles.container}>

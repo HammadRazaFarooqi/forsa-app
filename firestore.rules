@@ -26,7 +26,7 @@ service cloud.firestore {
     // Admin check function
     function isAdmin() {
       return isAuthenticated() && 
-        request.auth.uid in ['admin-uid-1', 'admin-uid-2']; // Add your admin UIDs here
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
     
     // Users collection
@@ -149,6 +149,12 @@ service cloud.firestore {
                        resource.data.userId == request.auth.uid;
     }
     
+    // Settings (Admin settings like commission rate)
+    match /settings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
     // Admin can read all collections
     match /{document=**} {
       allow read: if isAdmin();

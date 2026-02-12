@@ -151,6 +151,14 @@ const SignInScreen = () => {
 
       const userData = userDoc.data();
       const role = userData.role;
+      const status = userData.status;
+
+      // Check if user is suspended
+      if (status === 'suspended') {
+        // Sign out the user immediately if they are suspended
+        await auth.signOut();
+        throw new Error("Your account has been suspended. Please contact support.");
+      }
 
       // Use the Integrated AuthContext for role-based navigation and state
       // This ensures the (admin) layout guard can see the authenticated state
@@ -356,7 +364,6 @@ const SignInScreen = () => {
                   <Text style={styles.signInButtonText}>{i18n.t("sign_in")}</Text>
                 )}
               </TouchableOpacity>
-
               {/* Sign Up Link */}
               <View style={styles.signUpContainer}>
                 <Text style={styles.signUpText}>{i18n.t("dontHaveAccount")}</Text>
@@ -364,17 +371,6 @@ const SignInScreen = () => {
                   <Text style={styles.signUpLink}>{i18n.t("signUp")}</Text>
                 </TouchableOpacity>
               </View>
-
-              {/* Demo Admin Login */}
-              <TouchableOpacity
-                style={styles.demoButton}
-                onPress={async () => {
-                  await login('admin@demo.com', 'admin');
-                  router.replace("/(admin)/dashboard");
-                }}
-              >
-                <Text style={styles.demoButtonText}>Login as Admin (Demo)</Text>
-              </TouchableOpacity>
             </View>
           </ScrollView>
         </Animated.View>
@@ -533,6 +529,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
+    marginTop: 20,
   },
   signUpText: {
     color: "#666",
@@ -543,18 +540,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "bold",
     marginLeft: 4,
-  },
-  demoButton: {
-    marginTop: 20,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: "#4e73df",
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  demoButtonText: {
-    color: "#4e73df",
-    fontWeight: "600",
   },
 });
 
