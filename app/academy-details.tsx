@@ -1,0 +1,837 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { doc, getDoc, collection, addDoc } from 'firebase/firestore';
+import { db, auth } from '../lib/firebase';
+import i18n from '../locales/i18n';
+import { LinearGradient } from 'expo-linear-gradient';
+
+type Academy = {
+  id: string;
+  name: string;
+  city: string;
+  description: string;
+  fees: Record<string, number>;
+  images?: any[];
+  address?: string;
+  phone?: string;
+  profilePhoto?: string;
+};
+
+type RouteParams = {
+  params: {
+    academy: Academy;
+  };
+};
+
+export default function AcademyDetailsScreen() {
+  const params = useLocalSearchParams();
+  const router = useRouter();
+  const [academy, setAcademy] = useState<Academy | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [counters, setCounters] = useState<{ [age: string]: number }>({});
+  const [showPhone, setShowPhone] = useState(false);
+  const [offerings, setOfferings] = useState<string[]>([]);
+  const [posts, setPosts] = useState<any[]>([]);
+  const [images, setImages] = useState<any[]>([]);
+  const [selectedAge, setSelectedAge] = useState<string>('');
+  const [ageModalVisible, setAgeModalVisible] = useState(false);
+  const [bookingLoading, setBookingLoading] = useState(false);
+
+  useEffect(() => {
+    let parsed: Academy | null = null;
+    try {
+      parsed = params.academy ? JSON.parse(params.academy as string) : null;
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || !parsed.id) {
+      setAcademy(null);
+      setLoading(false);
+      return;
+    }
+    // Fetch full details from Firestore
+    const fetchAcademy = async () => {
+      try {
+        const academyDoc = await getDoc(doc(db, 'academies', parsed!.id));
+        if (academyDoc.exists()) {
+          const data = academyDoc.data();
+          setAcademy({
+            id: academyDoc.id,
+            name: data.academyName || '',
+            city: data.city || '',
+            description: data.description || '',
+            fees: data.fees || {},
+            address: data.address || '',
+            phone: data.phone || '',
+            images: data.images || [],
+            profilePhoto: data.profilePhoto || '',
+          });
+        setOfferings(data.offerings || []);
+        setPosts(data.posts || []);
+        setImages(data.images || []);
+        } else {
+          // Fallback to parsed data
+          setAcademy(parsed);
+          setOfferings([]);
+          setPosts([]);
+          setImages(parsed.images || []);
+        }
+      } catch (err) {
+        console.error('Error fetching academy:', err);
+        // Fallback to parsed data
+        setAcademy(parsed);
+        setOfferings([]);
+        setPosts([]);
+        setImages(parsed.images || []);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAcademy();
+  }, [params.academy]);
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#000" />
+        <Text style={styles.loadingText}>{i18n.t('loading') || 'Loading...'}</Text>
+      </View>
+    );
+  }
+  if (!academy) {
+    return (
+      <View style={styles.errorContainer}>
+        <Ionicons name="alert-circle-outline" size={64} color="#999" />
+        <Text style={styles.errorText}>{i18n.t('noDetails') || 'Academy details not found'}</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backButtonText}>{i18n.t('back') || 'Back'}</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  const total = Object.entries(academy.fees).reduce((sum, [age, fee]) => sum + (counters[age] || 0) * Number(fee), 0);
+
+  // Helper to sort age keys numerically
+  const availableAges = academy && academy.fees ? Object.keys(academy.fees).sort((a, b) => parseInt(a) - parseInt(b)) : [];
+  const selectedPrice = selectedAge && academy && academy.fees ? (academy.fees[selectedAge] || 0) : 0;
+
+  const handleReserve = async () => {
+    if (!selectedAge) {
+      Alert.alert(
+        i18n.t('error') || 'Error',
+        i18n.t('pleaseSelectAge') || 'Please select an age group for booking'
+      );
+      return;
+    }
+
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert(i18n.t('error'), i18n.t('loginRequired') || 'You must be logged in to book');
+      return;
+    }
+
+    const price = academy?.fees[selectedAge] || 0;
+
+    try {
+      setBookingLoading(true);
+      const bookingData = {
+        playerId: user.uid,
+        providerId: academy.id,
+        type: 'academy',
+        status: 'pending',
+        date: new Date().toISOString().split('T')[0],
+        createdAt: new Date().toISOString(),
+        name: academy.name,
+        city: academy.city,
+        ageGroup: selectedAge,
+        program: `${selectedAge} years`,
+        price: Number(price),
+      };
+
+      await addDoc(collection(db, 'bookings'), bookingData);
+
+      Alert.alert(
+        i18n.t('reservation') || 'Reservation',
+        `${i18n.t('reservationSuccess') || 'Reservation request sent!'}\n${i18n.t('ageGroup') || 'Age Group'}: ${selectedAge} ${i18n.t('years') || 'years'}\n${i18n.t('price') || 'Price'}: ${price} EGP`,
+        [{ text: i18n.t('ok') || 'OK', onPress: () => router.push('/player-bookings') }]
+      );
+    } catch (error) {
+      console.error('Error creating academy booking:', error);
+      Alert.alert(i18n.t('error'), i18n.t('bookingFailed') || 'Failed to create booking');
+    } finally {
+      setBookingLoading(false);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <LinearGradient
+        colors={['#000000', '#1a1a1a', '#2d2d2d']}
+        style={styles.gradient}
+      >
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Header Section with Academy Logo & Name */}
+          <View style={styles.headerSection}>
+            <TouchableOpacity style={styles.backIconButton} onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.logoContainer}>
+              {academy.profilePhoto ? (
+                <Image source={{ uri: academy.profilePhoto }} style={styles.logo} />
+              ) : (
+                <View style={styles.logoPlaceholder}>
+                  <Ionicons name="school" size={48} color="#666" />
+                </View>
+              )}
+            </View>
+            <Text style={styles.academyName}>{academy.name}</Text>
+            <View style={styles.locationRow}>
+              <Ionicons name="location" size={16} color="rgba(255,255,255,0.7)" />
+              <Text style={styles.locationText}>{academy.city}</Text>
+            </View>
+            {academy.phone && (
+              <TouchableOpacity 
+                style={styles.contactButton} 
+                onPress={() => setShowPhone(!showPhone)}
+              >
+                <Ionicons name="call-outline" size={20} color="#000" />
+                <Text style={styles.contactButtonText}>
+                  {showPhone ? academy.phone : (i18n.t('showPhone') || 'Show Phone')}
+                </Text>
+        </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Main Content Card */}
+          <View style={styles.contentCard}>
+            {/* About Section */}
+            {academy.description && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>{i18n.t('about') || 'About'}</Text>
+                <Text style={styles.descriptionText}>{academy.description}</Text>
+              </View>
+            )}
+
+            {/* Address Section */}
+            {academy.address && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Ionicons name="map-outline" size={20} color="#000" />
+                  <Text style={styles.sectionTitle}>{i18n.t('address') || 'Address'}</Text>
+                </View>
+                <Text style={styles.addressText}>{academy.address}</Text>
+      </View>
+            )}
+
+            {/* Gallery Section */}
+            {images && images.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>{i18n.t('gallery') || 'Gallery'}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gallery}>
+                  {images.map((img: any, idx: number) => (
+            <Image
+              key={idx}
+              source={typeof img === 'string' ? { uri: img } : img}
+                      style={styles.galleryImage}
+              resizeMode="cover"
+            />
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
+            {/* Monthly Fees Section */}
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="cash-outline" size={20} color="#000" />
+                <Text style={styles.sectionTitle}>{i18n.t('monthlyFees') || 'Monthly Fees'}</Text>
+              </View>
+              <View style={styles.feesContainer}>
+        {Object.entries(academy.fees).map(([age, fee]) => (
+                  <View key={age} style={styles.feeItem}>
+                    <View style={styles.feeInfo}>
+                      <Text style={styles.feeAgeLabel}>{i18n.t('age') || 'Age'}</Text>
+                      <Text style={styles.feeAge}>{age} {i18n.t('years') || 'years'}</Text>
+                    </View>
+            <Text style={styles.feeValue}>{String(fee)} EGP</Text>
+                    <View style={styles.counterContainer}>
+                      <TouchableOpacity 
+                        style={styles.counterButton} 
+                        onPress={() => setCounters(prev => ({ ...prev, [age]: Math.max((prev[age] || 0) - 1, 0) }))}
+                      >
+                        <Ionicons name="remove" size={20} color="#000" />
+              </TouchableOpacity>
+              <Text style={styles.counterValue}>{counters[age] || 0}</Text>
+                      <TouchableOpacity 
+                        style={styles.counterButton} 
+                        onPress={() => setCounters(prev => ({ ...prev, [age]: (prev[age] || 0) + 1 }))}
+                      >
+                        <Ionicons name="add" size={20} color="#000" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        ))}
+      </View>
+              {total > 0 && (
+                <View style={styles.totalContainer}>
+                  <Text style={styles.totalLabel}>{i18n.t('totalToPay') || 'Total to Pay'}</Text>
+                  <Text style={styles.totalValue}>{total} EGP</Text>
+                </View>
+              )}
+            </View>
+
+      {/* Offerings/Services Section */}
+      {offerings.length > 0 && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Ionicons name="star-outline" size={20} color="#000" />
+                  <Text style={styles.sectionTitle}>{i18n.t('offerings') || 'Services & Offerings'}</Text>
+                </View>
+                <View style={styles.offeringsContainer}>
+          {offerings.map((off, idx) => (
+                    <View key={idx} style={styles.offeringItem}>
+                      <Ionicons name="checkmark-circle" size={20} color="#000" />
+                      <Text style={styles.offeringText}>{off}</Text>
+                    </View>
+          ))}
+                </View>
+        </View>
+      )}
+
+      {/* Posts Section */}
+      {posts.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>{i18n.t('posts') || 'Latest Posts'}</Text>
+          {posts.map((post, idx) => (
+                  <View key={idx} style={styles.postCard}>
+              {post.image && (
+                      <Image source={{ uri: post.image }} style={styles.postImage} resizeMode="cover" />
+              )}
+                    <Text style={styles.postTitle}>{post.title}</Text>
+                    <Text style={styles.postBody}>{post.body}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+            {/* Age Selection for Booking */}
+            <View style={styles.bookingSection}>
+              <Text style={styles.bookingSectionTitle}>{i18n.t('selectAgeForBooking') || 'Select Age Group for Booking'}</Text>
+              <TouchableOpacity
+                style={[styles.ageSelectButton, selectedAge && styles.ageSelectButtonActive]}
+                onPress={() => setAgeModalVisible(true)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="calendar-outline" size={20} color={selectedAge ? "#000" : "#999"} />
+                <Text style={[styles.ageSelectText, !selectedAge && styles.ageSelectPlaceholder]}>
+                  {selectedAge
+                    ? `${selectedAge} ${i18n.t('years') || 'years'} - ${selectedPrice} EGP`
+                    : i18n.t('selectAgeGroup') || 'Select Age Group'
+                  }
+                </Text>
+                <Ionicons name="chevron-down" size={20} color="#999" />
+              </TouchableOpacity>
+              {selectedAge && (
+                <View style={styles.selectedAgeInfo}>
+                  <Text style={styles.selectedAgeText}>
+                    {i18n.t('selectedAge') || 'Selected'}: {selectedAge} {i18n.t('years') || 'years'}
+                  </Text>
+                  <Text style={styles.selectedPriceText}>
+                    {i18n.t('price') || 'Price'}: {selectedPrice} EGP/{i18n.t('month') || 'month'}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Age Selection Modal */}
+            <Modal
+              visible={ageModalVisible}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setAgeModalVisible(false)}
+            >
+              <TouchableOpacity
+                style={styles.modalOverlay}
+                activeOpacity={1}
+                onPress={() => setAgeModalVisible(false)}
+              >
+                <View style={styles.modalContent}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>{i18n.t('selectAgeGroup') || 'Select Age Group'}</Text>
+                    <TouchableOpacity onPress={() => setAgeModalVisible(false)}>
+                      <Ionicons name="close" size={24} color="#000" />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView style={styles.modalScrollView}>
+                    {availableAges.map((age) => (
+                      <TouchableOpacity
+                        key={age}
+                        style={[styles.modalOption, selectedAge === age && styles.modalOptionSelected]}
+                        onPress={() => {
+                          setSelectedAge(age);
+                          setAgeModalVisible(false);
+                        }}
+                      >
+                        <View style={styles.modalOptionContent}>
+                          <Text style={[styles.modalOptionText, selectedAge === age && styles.modalOptionTextSelected]}>
+                            {age} {i18n.t('years') || 'years'}
+                          </Text>
+                          <Text style={[styles.modalOptionPrice, selectedAge === age && styles.modalOptionPriceSelected]}>
+                            {academy.fees[age]} EGP
+                          </Text>
+                        </View>
+                        {selectedAge === age && <Ionicons name="checkmark" size={20} color="#fff" />}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              </TouchableOpacity>
+            </Modal>
+
+            {/* Reserve Button */}
+            <TouchableOpacity 
+              style={[styles.reserveButton, (!selectedAge || bookingLoading) && styles.reserveButtonDisabled]} 
+              onPress={handleReserve}
+              disabled={!selectedAge || bookingLoading}
+            >
+              {bookingLoading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.reserveButtonText}>
+                  {selectedAge
+                    ? `${i18n.t('reserveNow') || 'Reserve Now'} - ${selectedPrice} EGP`
+                    : i18n.t('selectAgeToBook') || 'Select Age to Book'
+                  }
+                </Text>
+              )}
+          </TouchableOpacity>
+        </View>
+    </ScrollView>
+      </LinearGradient>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  gradient: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f8f8',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f8f8',
+    padding: 24,
+  },
+  errorText: {
+    marginTop: 16,
+    fontSize: 18,
+    color: '#666',
+    textAlign: 'center',
+  },
+  scrollContent: {
+    paddingBottom: 40,
+  },
+  headerSection: {
+    alignItems: 'center',
+    paddingTop: 60,
+    paddingBottom: 32,
+    paddingHorizontal: 24,
+    position: 'relative',
+  },
+  backIconButton: {
+    position: 'absolute',
+    top: 60,
+    left: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1,
+  },
+  logoContainer: {
+    marginBottom: 16,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 4,
+    borderColor: '#fff',
+  },
+  logoPlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  academyName: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  locationText: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.7)',
+    marginLeft: 6,
+  },
+  contactButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    gap: 8,
+  },
+  contactButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+  },
+  contentCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingTop: 32,
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    marginTop: 0,
+  },
+  section: {
+    marginBottom: 32,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 8,
+  },
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#000',
+    marginBottom: 12,
+  },
+  descriptionText: {
+    fontSize: 16,
+    color: '#333',
+    lineHeight: 24,
+  },
+  addressText: {
+    fontSize: 16,
+    color: '#333',
+    lineHeight: 22,
+  },
+  gallery: {
+    marginTop: 8,
+  },
+  galleryImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 16,
+    marginRight: 12,
+  },
+  feesContainer: {
+    backgroundColor: '#f8f8f8',
+    borderRadius: 16,
+    padding: 16,
+    gap: 16,
+  },
+  feeItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  feeInfo: {
+    flex: 1,
+  },
+  feeAgeLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 4,
+  },
+  feeAge: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+  },
+  feeValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000',
+    marginRight: 16,
+    minWidth: 80,
+    textAlign: 'right',
+  },
+  counterContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  counterButton: {
+    padding: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  counterValue: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000',
+    marginHorizontal: 12,
+    minWidth: 30,
+    textAlign: 'center',
+  },
+  totalContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 20,
+    paddingTop: 20,
+    borderTopWidth: 2,
+    borderTopColor: '#000',
+  },
+  totalLabel: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  totalValue: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  offeringsContainer: {
+    gap: 12,
+  },
+  offeringItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  offeringText: {
+    fontSize: 16,
+    color: '#333',
+    flex: 1,
+  },
+  postCard: {
+    backgroundColor: '#f8f8f8',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+  },
+  postImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  postTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000',
+    marginBottom: 8,
+  },
+  postBody: {
+    fontSize: 16,
+    color: '#333',
+    lineHeight: 22,
+  },
+  reserveButton: {
+    backgroundColor: '#000',
+    borderRadius: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+    marginTop: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  reserveButtonDisabled: {
+    backgroundColor: '#666',
+    opacity: 0.6,
+  },
+  reserveButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  bookingSection: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    marginTop: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  bookingSectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000',
+    marginBottom: 16,
+  },
+  ageSelectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f8f8',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    gap: 12,
+  },
+  ageSelectButtonActive: {
+    borderColor: '#000',
+  },
+  ageSelectText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+  },
+  ageSelectPlaceholder: {
+    color: '#999',
+    fontWeight: 'normal',
+  },
+  selectedAgeInfo: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: '#f0f8ff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#000',
+  },
+  selectedAgeText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 4,
+  },
+  selectedPriceText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '85%',
+    maxHeight: '70%',
+    overflow: 'hidden',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  modalScrollView: {
+    maxHeight: 400,
+  },
+  modalOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  modalOptionSelected: {
+    backgroundColor: '#000',
+  },
+  modalOptionContent: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  modalOptionText: {
+    fontSize: 16,
+    color: '#000',
+  },
+  modalOptionTextSelected: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  modalOptionPrice: {
+    fontSize: 16,
+    color: '#666',
+    marginLeft: 16,
+  },
+  modalOptionPriceSelected: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  backButton: {
+    backgroundColor: '#000',
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    alignItems: 'center',
+    marginTop: 24,
+  },
+  backButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});
