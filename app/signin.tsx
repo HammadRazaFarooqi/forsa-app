@@ -20,6 +20,7 @@ import {
 } from "react-native";
 import { auth, db } from "../lib/firebase";
 import i18n from "../locales/i18n";
+import { useAuth } from "../context/AuthContext";
 
 type Errors = {
   email?: string;
@@ -29,6 +30,7 @@ type Errors = {
 
 const SignInScreen = () => {
   const router = useRouter();
+  const { login } = useAuth();
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
@@ -68,24 +70,25 @@ const SignInScreen = () => {
   const handleSignin = async () => {
     if (!validate()) return;
     setLoading(true);
+    let authEmail = "";
     try {
       // Check if input is email or phone
       const isEmail = emailOrPhone.includes("@");
       let email = emailOrPhone;
-      let authEmail = email;
+      authEmail = email;
 
       // If phone number, we need to find the user by phone in Firestore first
       if (!isEmail) {
         // Clean phone number (remove spaces, dashes, parentheses, dots, and + sign) - same format used in signup
         // Keep only digits for email generation
         const cleanedPhone = emailOrPhone.replace(/[\s\-\(\)\.\+]/g, '');
-        
+
         // Try to find user in Firestore to get the exact phone format used during signup
         let storedPhone = null;
-        
+
         try {
           const usersRef = collection(db, "users");
-          
+
           // Try multiple phone formats to find the user
           // Generate all possible variations of the phone number
           const phoneVariations = [
@@ -97,16 +100,16 @@ const SignInScreen = () => {
             emailOrPhone.replace(/[^\d+]/g, ''),            // Only digits and +
             emailOrPhone.replace(/[^\d]/g, ''),            // Only digits
           ];
-          
+
           // Remove duplicates and empty strings
           const uniqueVariations = [...new Set(phoneVariations)].filter(v => v.length > 0);
-          
+
           console.log("Searching for user with phone variations:", uniqueVariations);
-          
+
           for (const phoneVar of uniqueVariations) {
             const phoneQuery = query(usersRef, where("phone", "==", phoneVar));
             const phoneSnapshot = await getDocs(phoneQuery);
-            
+
             if (!phoneSnapshot.empty) {
               const userData = phoneSnapshot.docs[0].data();
               storedPhone = userData.phone; // Get the exact phone format stored in Firestore
@@ -117,17 +120,17 @@ const SignInScreen = () => {
         } catch (searchErr) {
           console.log("Phone search error (will try with cleaned phone):", searchErr);
         }
-        
+
         // Generate email the same way as signup does
         // Format: user_{phone}@forsa.app
         // Use the stored phone if found, otherwise use cleaned input phone
         // Always clean the phone (remove all non-digits) for email generation
-        const phoneForEmail = storedPhone 
-          ? storedPhone.replace(/[\s\-\(\)\.\+]/g, '') 
+        const phoneForEmail = storedPhone
+          ? storedPhone.replace(/[\s\-\(\)\.\+]/g, '')
           : cleanedPhone;
-        
+
         authEmail = `user_${phoneForEmail}@forsa.app`;
-        
+
         console.log("Attempting login with email:", authEmail);
         console.log("Phone used for email generation:", phoneForEmail);
       }
@@ -149,25 +152,33 @@ const SignInScreen = () => {
       const userData = userDoc.data();
       const role = userData.role;
 
+      // Use the Integrated AuthContext for role-based navigation and state
+      // This ensures the (admin) layout guard can see the authenticated state
+      await login(authEmail, role === 'admin' ? 'admin' : 'user');
+
       // ✅ Navigate based on role
-      switch (role) {
-        case "player":
-          router.replace("/player-feed");
-          break;
-        case "agent":
-          router.replace("/agent-feed");
-          break;
-        case "academy":
-          router.replace("/academy-home");
-          break;
-        case "parent":
-          router.replace("/parent-feed");
-          break;
-        case "clinic":
-          router.replace("/clinic-feed");
-          break;
-        default:
-          Alert.alert("Error", "Unknown role");
+      if (role === 'admin') {
+        router.replace("/(admin)/dashboard");
+      } else {
+        switch (role) {
+          case "player":
+            router.replace("/player-feed");
+            break;
+          case "agent":
+            router.replace("/agent-feed");
+            break;
+          case "academy":
+            router.replace("/academy-home");
+            break;
+          case "parent":
+            router.replace("/parent-feed");
+            break;
+          case "clinic":
+            router.replace("/clinic-feed");
+            break;
+          default:
+            Alert.alert("Error", "Unknown role");
+        }
       }
     } catch (err: any) {
       let errorMessage = i18n.t("loginFailed") || "Login failed";
@@ -225,135 +236,146 @@ const SignInScreen = () => {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.welcomeText}>{i18n.t("welcome_back")}</Text>
-            <Text style={styles.subtitleText}>
-              {i18n.t("sign_in_to_continue")}
-            </Text>
-          </View>
-
-          {/* Form Card */}
-          <View style={styles.formCard}>
-            {/* Email Input */}
-            <View style={styles.inputContainer}>
-              <View
-                style={[
-                  styles.inputWrapper,
-                  focusedInput === "email" && styles.inputWrapperFocused,
-                  errors.email && styles.inputWrapperError,
-                ]}
-              >
-                <Ionicons
-                  name={emailOrPhone.includes("@") ? "mail-outline" : "call-outline"}
-                  size={20}
-                  color={focusedInput === "email" ? "#000" : "#999"}
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder={i18n.t("email_or_phone") || "Email or Phone"}
-                  placeholderTextColor="#999"
-                  value={emailOrPhone}
-                  onChangeText={setEmailOrPhone}
-                  onFocus={() => setFocusedInput("email")}
-                  onBlur={() => setFocusedInput(null)}
-                  autoCapitalize="none"
-                  keyboardType="default"
-                  autoComplete="off"
-                />
-              </View>
-              {errors.email && (
-                <Text style={styles.errorText}>{errors.email}</Text>
-              )}
+            {/* Header */}
+            <View style={styles.header}>
+              <Text style={styles.welcomeText}>{i18n.t("welcome_back")}</Text>
+              <Text style={styles.subtitleText}>
+                {i18n.t("sign_in_to_continue")}
+              </Text>
             </View>
 
-            {/* Password Input */}
-            <View style={styles.inputContainer}>
-              <View
-                style={[
-                  styles.inputWrapper,
-                  focusedInput === "password" && styles.inputWrapperFocused,
-                  errors.password && styles.inputWrapperError,
-                ]}
-              >
-                <Ionicons
-                  name="lock-closed-outline"
-                  size={20}
-                  color={focusedInput === "password" ? "#000" : "#999"}
-                  style={styles.inputIcon}
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder={i18n.t("password")}
-                  placeholderTextColor="#999"
-                  value={password}
-                  onChangeText={setPassword}
-                  onFocus={() => setFocusedInput("password")}
-                  onBlur={() => setFocusedInput(null)}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                  autoComplete="password"
-                />
-                <TouchableOpacity
-                  onPress={() => setShowPassword(!showPassword)}
-                  style={styles.eyeIcon}
+            {/* Form Card */}
+            <View style={styles.formCard}>
+              {/* Email Input */}
+              <View style={styles.inputContainer}>
+                <View
+                  style={[
+                    styles.inputWrapper,
+                    focusedInput === "email" && styles.inputWrapperFocused,
+                    errors.email && styles.inputWrapperError,
+                  ]}
                 >
                   <Ionicons
-                    name={showPassword ? "eye-outline" : "eye-off-outline"}
+                    name={emailOrPhone.includes("@") ? "mail-outline" : "call-outline"}
                     size={20}
-                    color="#999"
+                    color={focusedInput === "email" ? "#000" : "#999"}
+                    style={styles.inputIcon}
                   />
+                  <TextInput
+                    style={styles.input}
+                    placeholder={i18n.t("email_or_phone") || "Email or Phone"}
+                    placeholderTextColor="#999"
+                    value={emailOrPhone}
+                    onChangeText={setEmailOrPhone}
+                    onFocus={() => setFocusedInput("email")}
+                    onBlur={() => setFocusedInput(null)}
+                    autoCapitalize="none"
+                    keyboardType="default"
+                    autoComplete="off"
+                  />
+                </View>
+                {errors.email && (
+                  <Text style={styles.errorText}>{errors.email}</Text>
+                )}
+              </View>
+
+              {/* Password Input */}
+              <View style={styles.inputContainer}>
+                <View
+                  style={[
+                    styles.inputWrapper,
+                    focusedInput === "password" && styles.inputWrapperFocused,
+                    errors.password && styles.inputWrapperError,
+                  ]}
+                >
+                  <Ionicons
+                    name="lock-closed-outline"
+                    size={20}
+                    color={focusedInput === "password" ? "#000" : "#999"}
+                    style={styles.inputIcon}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder={i18n.t("password")}
+                    placeholderTextColor="#999"
+                    value={password}
+                    onChangeText={setPassword}
+                    onFocus={() => setFocusedInput("password")}
+                    onBlur={() => setFocusedInput(null)}
+                    secureTextEntry={!showPassword}
+                    autoCapitalize="none"
+                    autoComplete="password"
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowPassword(!showPassword)}
+                    style={styles.eyeIcon}
+                  >
+                    <Ionicons
+                      name={showPassword ? "eye-outline" : "eye-off-outline"}
+                      size={20}
+                      color="#999"
+                    />
+                  </TouchableOpacity>
+                </View>
+                {errors.password && (
+                  <Text style={styles.errorText}>{errors.password}</Text>
+                )}
+              </View>
+
+              {/* Forgot Password */}
+              <TouchableOpacity
+                onPress={() => router.push("/forgot-password")}
+                style={styles.forgotPassword}
+              >
+                <Text style={styles.forgotPasswordText}>
+                  {i18n.t("forgotPassword")}
+                </Text>
+              </TouchableOpacity>
+
+              {/* Error Message */}
+              {errors.submit && (
+                <View style={styles.errorContainer}>
+                  <Ionicons name="alert-circle" size={16} color="#ff3b30" />
+                  <Text style={styles.errorSubmitText}>{errors.submit}</Text>
+                </View>
+              )}
+
+              {/* Sign In Button */}
+              <TouchableOpacity
+                style={[
+                  styles.signInButton,
+                  loading && styles.signInButtonDisabled,
+                ]}
+                onPress={handleSignin}
+                disabled={loading}
+                activeOpacity={0.8}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.signInButtonText}>{i18n.t("sign_in")}</Text>
+                )}
+              </TouchableOpacity>
+
+              {/* Sign Up Link */}
+              <View style={styles.signUpContainer}>
+                <Text style={styles.signUpText}>{i18n.t("dontHaveAccount")}</Text>
+                <TouchableOpacity onPress={() => router.push("/role")}>
+                  <Text style={styles.signUpLink}>{i18n.t("signUp")}</Text>
                 </TouchableOpacity>
               </View>
-              {errors.password && (
-                <Text style={styles.errorText}>{errors.password}</Text>
-              )}
-            </View>
 
-            {/* Forgot Password */}
-            <TouchableOpacity
-              onPress={() => router.push("/forgot-password")}
-              style={styles.forgotPassword}
-            >
-              <Text style={styles.forgotPasswordText}>
-                {i18n.t("forgotPassword")}
-              </Text>
-            </TouchableOpacity>
-
-            {/* Error Message */}
-            {errors.submit && (
-              <View style={styles.errorContainer}>
-                <Ionicons name="alert-circle" size={16} color="#ff3b30" />
-                <Text style={styles.errorSubmitText}>{errors.submit}</Text>
-              </View>
-            )}
-
-            {/* Sign In Button */}
-            <TouchableOpacity
-              style={[
-                styles.signInButton,
-                loading && styles.signInButtonDisabled,
-              ]}
-              onPress={handleSignin}
-              disabled={loading}
-              activeOpacity={0.8}
-            >
-              {loading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.signInButtonText}>{i18n.t("sign_in")}</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* Sign Up Link */}
-            <View style={styles.signUpContainer}>
-              <Text style={styles.signUpText}>{i18n.t("dontHaveAccount")}</Text>
-              <TouchableOpacity onPress={() => router.push("/role")}>
-                <Text style={styles.signUpLink}>{i18n.t("signUp")}</Text>
+              {/* Demo Admin Login */}
+              <TouchableOpacity
+                style={styles.demoButton}
+                onPress={async () => {
+                  await login('admin@demo.com', 'admin');
+                  router.replace("/(admin)/dashboard");
+                }}
+              >
+                <Text style={styles.demoButtonText}>Login as Admin (Demo)</Text>
               </TouchableOpacity>
             </View>
-          </View>
           </ScrollView>
         </Animated.View>
       </LinearGradient>
@@ -521,6 +543,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "bold",
     marginLeft: 4,
+  },
+  demoButton: {
+    marginTop: 20,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: "#4e73df",
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  demoButtonText: {
+    color: "#4e73df",
+    fontWeight: "600",
   },
 });
 

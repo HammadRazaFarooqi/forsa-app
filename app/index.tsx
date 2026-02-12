@@ -1,9 +1,11 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import { View, ActivityIndicator } from 'react-native';
+import { useAuth } from '../context/AuthContext';
 
 export default function Index() {
   const router = useRouter();
+  const { user, isLoading } = useAuth();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -11,10 +13,20 @@ export default function Index() {
   }, []);
 
   useEffect(() => {
-    if (mounted) {
-      router.replace('/splash');
-    }
-  }, [mounted]);
+    if (!mounted || isLoading) return;
 
-  return <View />;
+    if (!user) {
+      router.replace('/welcome'); // Redirect to welcome/login if not logged in
+    } else if (user.role === 'admin') {
+      router.replace('/(admin)/dashboard');
+    } else {
+      router.replace('/player-home'); // Default home for users
+    }
+  }, [mounted, user, isLoading]);
+
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <ActivityIndicator size="large" color="#0000ff" />
+    </View>
+  );
 }

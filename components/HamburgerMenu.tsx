@@ -5,6 +5,7 @@ import React from 'react';
 import { I18nManager, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import i18n from '../locales/i18n';
 import { useHamburgerMenu } from './HamburgerMenuContext';
+import { useAuth } from '../context/AuthContext';
 
 interface MenuItem {
   label: string;
@@ -18,7 +19,8 @@ export default function HamburgerMenu() {
   const router = useRouter();
   const segments = useSegments();
   const { visible, closeMenu } = useHamburgerMenu();
-  
+  const { user } = useAuth();
+
   // Detect role from current route
   const currentPath = '/' + segments.join('/');
   const getRole = (): 'player' | 'parent' | 'agent' | 'clinic' | 'academy' => {
@@ -27,33 +29,33 @@ export default function HamburgerMenu() {
     if (currentPath.includes('/parent-')) return 'parent';
     // Agent routes - but exclude search routes that players use
     // Only match actual agent profile/feed routes, not search routes
-    if (currentPath.includes('/agent-feed') || 
-        currentPath.includes('/agent-edit-profile') ||
-        currentPath.includes('/agent-players') ||
-        currentPath.includes('/agent-contacts') ||
-        currentPath.includes('/agent-upload-media') ||
-        currentPath.includes('/agent-services')) {
+    if (currentPath.includes('/agent-feed') ||
+      currentPath.includes('/agent-edit-profile') ||
+      currentPath.includes('/agent-players') ||
+      currentPath.includes('/agent-contacts') ||
+      currentPath.includes('/agent-upload-media') ||
+      currentPath.includes('/agent-services')) {
       return 'agent';
     }
     // Clinic routes - but exclude search routes that players use
     // Only match actual clinic profile/feed routes, not search routes
-    if (currentPath.includes('/clinic-feed') || 
-        currentPath.includes('/clinic-edit-services') ||
-        currentPath.includes('/clinic-edit-timetable') ||
-        currentPath.includes('/clinic-bookings')) {
+    if (currentPath.includes('/clinic-feed') ||
+      currentPath.includes('/clinic-edit-services') ||
+      currentPath.includes('/clinic-edit-timetable') ||
+      currentPath.includes('/clinic-bookings')) {
       return 'clinic';
     }
     // Academy routes - but exclude search routes that players use
     // Only match actual academy profile/feed routes, not search routes
-    if (currentPath.includes('/academy-feed') || 
-        currentPath.includes('/academy-edit-profile') ||
-        currentPath.includes('/academy-upload-media') ||
-        currentPath.includes('/academy-messages') ||
-        currentPath.includes('/academy-services') ||
-        currentPath.includes('/academy-assistance') ||
-        currentPath.includes('/academy-chat') ||
-        currentPath.includes('/academy-home') ||
-        currentPath.includes('/academy-bookings')) {
+    if (currentPath.includes('/academy-feed') ||
+      currentPath.includes('/academy-edit-profile') ||
+      currentPath.includes('/academy-upload-media') ||
+      currentPath.includes('/academy-messages') ||
+      currentPath.includes('/academy-services') ||
+      currentPath.includes('/academy-assistance') ||
+      currentPath.includes('/academy-chat') ||
+      currentPath.includes('/academy-home') ||
+      currentPath.includes('/academy-bookings')) {
       return 'academy';
     }
     // Explicitly exclude search routes - these should show player menu
@@ -65,51 +67,63 @@ export default function HamburgerMenu() {
 
   // Get menu items based on role
   const getMenuItems = (): MenuItem[] => {
+    let items: MenuItem[] = [];
+
+    // Add Admin Dashboard link for admins
+    if (user?.role === 'admin') {
+      items.push({ label: 'Admin Dashboard', route: '/(admin)/dashboard', icon: 'shield-checkmark-outline', special: true });
+    }
+
     switch (role) {
       case 'parent':
-        return [
-          { label: i18n.t('parentFeed') || 'Parent Feed', route: '/parent-feed', icon: 'home-outline' },
-          { label: i18n.t('parentEditProfile') || 'Edit Profile', route: '/parent-edit-profile', icon: 'create-outline' },
-          { label: i18n.t('searchAcademies') || 'Search Academies', route: '/parent-search-academies', icon: 'school-outline' },
-          { label: i18n.t('searchClinics') || 'Search Clinics', route: '/parent-search-clinics', icon: 'medical-outline' },
-          { label: i18n.t('myBookings') || 'My Bookings', route: '/parent-bookings', icon: 'calendar-outline' },
-          { label: i18n.t('parentMessages') || 'Messages', route: '/parent-messages', icon: 'chatbubbles-outline' },
+        items = [...items,
+        { label: i18n.t('parentFeed') || 'Parent Feed', route: '/parent-feed', icon: 'home-outline' },
+        { label: i18n.t('parentEditProfile') || 'Edit Profile', route: '/parent-edit-profile', icon: 'create-outline' },
+        { label: i18n.t('searchAcademies') || 'Search Academies', route: '/parent-search-academies', icon: 'school-outline' },
+        { label: i18n.t('searchClinics') || 'Search Clinics', route: '/parent-search-clinics', icon: 'medical-outline' },
+        { label: i18n.t('myBookings') || 'My Bookings', route: '/parent-bookings', icon: 'calendar-outline' },
+        { label: i18n.t('parentMessages') || 'Messages', route: '/parent-messages', icon: 'chatbubbles-outline' },
         ];
+        break;
       case 'agent':
-        return [
-          { label: i18n.t('agentFeed') || 'Feed', route: '/agent-feed', icon: 'home-outline' },
-          { label: i18n.t('agentEditProfile') || 'Edit Profile', route: '/agent-edit-profile', icon: 'create-outline' },
-          { label: i18n.t('agentPlayers') || 'Players', route: '/agent-players', icon: 'people-outline' },
-          { label: i18n.t('messages') || 'Messages', route: '/agent-contacts', icon: 'chatbubbles-outline' },
-          { label: i18n.t('uploadMedia') || 'Upload Media', route: '/agent-upload-media', icon: 'cloud-upload-outline' },
+        items = [...items,
+        { label: i18n.t('agentFeed') || 'Feed', route: '/agent-feed', icon: 'home-outline' },
+        { label: i18n.t('agentEditProfile') || 'Edit Profile', route: '/agent-edit-profile', icon: 'create-outline' },
+        { label: i18n.t('agentPlayers') || 'Players', route: '/agent-players', icon: 'people-outline' },
+        { label: i18n.t('messages') || 'Messages', route: '/agent-contacts', icon: 'chatbubbles-outline' },
+        { label: i18n.t('uploadMedia') || 'Upload Media', route: '/agent-upload-media', icon: 'cloud-upload-outline' },
         ];
+        break;
       case 'clinic':
-        return [
-          { label: i18n.t('clinicFeed') || 'Clinic Feed', route: '/clinic-feed', icon: 'home-outline' },
-          { label: i18n.t('editServices') || 'Edit Services', route: '/clinic-edit-services', icon: 'list-outline' },
-          { label: i18n.t('editTimetable') || 'Edit Timetable', route: '/clinic-edit-timetable', icon: 'time-outline' },
-          { label: i18n.t('myBookings') || 'My Bookings', route: '/clinic-bookings', icon: 'calendar-outline' },
+        items = [...items,
+        { label: i18n.t('clinicFeed') || 'Clinic Feed', route: '/clinic-feed', icon: 'home-outline' },
+        { label: i18n.t('editServices') || 'Edit Services', route: '/clinic-edit-services', icon: 'list-outline' },
+        { label: i18n.t('editTimetable') || 'Edit Timetable', route: '/clinic-edit-timetable', icon: 'time-outline' },
+        { label: i18n.t('myBookings') || 'My Bookings', route: '/clinic-bookings', icon: 'calendar-outline' },
         ];
+        break;
       case 'academy':
-        return [
-          { label: i18n.t('academyFeed') || 'Feed', route: '/academy-feed', icon: 'home-outline' },
-          { label: i18n.t('academyEditProfile') || 'Edit Profile', route: '/academy-edit-profile', icon: 'create-outline' },
-          { label: i18n.t('academyUploadMedia') || 'Upload Media', route: '/academy-upload-media', icon: 'cloud-upload-outline' },
-          { label: i18n.t('myBookings') || 'My Bookings', route: '/academy-bookings', icon: 'calendar-outline' },
-          { label: i18n.t('academyMessages') || 'Messages', route: '/academy-messages', icon: 'chatbubbles-outline' },
+        items = [...items,
+        { label: i18n.t('academyFeed') || 'Feed', route: '/academy-feed', icon: 'home-outline' },
+        { label: i18n.t('academyEditProfile') || 'Edit Profile', route: '/academy-edit-profile', icon: 'create-outline' },
+        { label: i18n.t('academyUploadMedia') || 'Upload Media', route: '/academy-upload-media', icon: 'cloud-upload-outline' },
+        { label: i18n.t('myBookings') || 'My Bookings', route: '/academy-bookings', icon: 'calendar-outline' },
+        { label: i18n.t('academyMessages') || 'Messages', route: '/academy-messages', icon: 'chatbubbles-outline' },
         ];
+        break;
       default: // player
-        return [
-          { label: i18n.t('feed') || 'Feed', route: '/player-feed', icon: 'home-outline' },
-          { label: i18n.t('editProfile') || 'Edit Profile', route: '/player-profile', icon: 'create-outline' },
-          { label: i18n.t('uploadMedia') || 'Upload Media', route: '/player-upload-media', icon: 'cloud-upload-outline' },
-          { label: i18n.t('messages') || 'Messages', route: '/player-messages', icon: 'chatbubbles-outline' },
-          { label: i18n.t('myBookings') || 'My Bookings', route: '/player-bookings', icon: 'calendar-outline' },
-          { label: i18n.t('searchAcademies') || 'Search Academies', route: '/academy-search', icon: 'school-outline' },
-          { label: i18n.t('searchAgents') || 'Search Agents', route: '/agent-search', icon: 'people-outline' },
-          { label: i18n.t('clinicSearch') || 'Clinic Search', route: '/clinic-search', icon: 'medical-outline' },
+        items = [...items,
+        { label: i18n.t('feed') || 'Feed', route: '/player-feed', icon: 'home-outline' },
+        { label: i18n.t('editProfile') || 'Edit Profile', route: '/player-profile', icon: 'create-outline' },
+        { label: i18n.t('uploadMedia') || 'Upload Media', route: '/player-upload-media', icon: 'cloud-upload-outline' },
+        { label: i18n.t('messages') || 'Messages', route: '/player-messages', icon: 'chatbubbles-outline' },
+        { label: i18n.t('myBookings') || 'My Bookings', route: '/player-bookings', icon: 'calendar-outline' },
+        { label: i18n.t('searchAcademies') || 'Search Academies', route: '/academy-search', icon: 'school-outline' },
+        { label: i18n.t('searchAgents') || 'Search Agents', route: '/agent-search', icon: 'people-outline' },
+        { label: i18n.t('clinicSearch') || 'Clinic Search', route: '/clinic-search', icon: 'medical-outline' },
         ];
     }
+    return items;
   };
 
   // Get assistance route based on role
@@ -125,17 +139,17 @@ export default function HamburgerMenu() {
 
   const menuItems = getMenuItems();
   const assistanceRoute = getAssistanceRoute();
-  const assistanceLabel = role === 'player' 
+  const assistanceLabel = role === 'player'
     ? (i18n.t('academyAssistance') || 'Assistance & Extras')
     : role === 'agent'
-    ? (i18n.t('agentAssistance') || 'Assistance & Extras')
-    : role === 'clinic'
-    ? (i18n.t('clinicAssistance') || 'Assistance & Extras')
-    : (i18n.t('academyAssistance') || 'Assistance & Extras');
+      ? (i18n.t('agentAssistance') || 'Assistance & Extras')
+      : role === 'clinic'
+        ? (i18n.t('clinicAssistance') || 'Assistance & Extras')
+        : (i18n.t('academyAssistance') || 'Assistance & Extras');
 
   const handleNavigate = (path: string | { pathname: string; params?: any }) => {
     closeMenu();
-    if (path === '/parent-feed' || path === '/agent-feed' || path === '/clinic-feed' || path === '/academy-feed' || path === '/player-feed') {
+    if (path === '/parent-feed' || path === '/agent-feed' || path === '/clinic-feed' || path === '/academy-feed' || path === '/player-feed' || path === '/(admin)/dashboard') {
       router.replace(path as any);
     } else {
       router.push(path as any);
@@ -147,99 +161,99 @@ export default function HamburgerMenu() {
       <View style={styles.modalContainer}>
         <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={closeMenu} />
         <View style={styles.menuBox}>
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* Gold Header Item */}
-          {(role === 'player' || role === 'agent' || role === 'clinic' || role === 'academy') && (
-            <TouchableOpacity 
-              style={[styles.menuItem, styles.goldMenuItem]} 
-              onPress={() => handleNavigate(assistanceRoute)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="star" size={20} color="#000" style={styles.menuIcon} />
-              <Text style={[styles.menuText, styles.goldMenuText]}>
-                {assistanceLabel}
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Regular Menu Items */}
-          {menuItems.map((item, index) => (
-            <React.Fragment key={item.route}>
-              {item.dividerBefore && <View style={styles.divider} />}
-              <TouchableOpacity 
-                style={styles.menuItem} 
-                onPress={() => handleNavigate(item.route)}
+          <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            {/* Gold Header Item */}
+            {(role === 'player' || role === 'agent' || role === 'clinic' || role === 'academy') && (
+              <TouchableOpacity
+                style={[styles.menuItem, styles.goldMenuItem]}
+                onPress={() => handleNavigate(assistanceRoute)}
                 activeOpacity={0.7}
               >
-                <Ionicons name={item.icon as any} size={20} color="#000" style={styles.menuIcon} />
-                <Text style={styles.menuText}>{item.label}</Text>
-              </TouchableOpacity>
-            </React.Fragment>
-          ))}
-
-          {/* Divider */}
-          <View style={styles.divider} />
-
-          <TouchableOpacity 
-            style={styles.menuItem} 
-            onPress={() => handleNavigate('/signout')}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="log-out-outline" size={20} color="#ff3b30" style={styles.menuIcon} />
-            <Text style={[styles.menuText, styles.signOutText]}>
-              {i18n.t('signOut') || 'Sign Out'}
-            </Text>
-          </TouchableOpacity>
-
-          {/* Language Switcher */}
-          <View style={styles.languageSection}>
-            <Text style={styles.languageLabel}>{i18n.t('selectLanguage') || 'Select Language'}</Text>
-            <View style={styles.languageRow}>
-              <TouchableOpacity 
-                style={[styles.langButton, i18n.locale === 'en' && styles.langButtonActive]} 
-                onPress={async () => {
-                  i18n.locale = 'en';
-                  await AsyncStorage.setItem('appLang', 'en');
-                  I18nManager.forceRTL(false);
-                  I18nManager.swapLeftAndRightInRTL(false);
-                  closeMenu();
-                  setTimeout(() => {
-                    const currentPath = '/' + segments.join('/');
-                    if (currentPath && currentPath !== '/') {
-                      router.replace(currentPath as any);
-                    }
-                  }, 100);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.langButtonText, i18n.locale === 'en' && styles.langButtonTextActive]}>
-                  English
+                <Ionicons name="star" size={20} color="#000" style={styles.menuIcon} />
+                <Text style={[styles.menuText, styles.goldMenuText]}>
+                  {assistanceLabel}
                 </Text>
               </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.langButton, i18n.locale === 'ar' && styles.langButtonActive]} 
-                onPress={async () => {
-                  i18n.locale = 'ar';
-                  await AsyncStorage.setItem('appLang', 'ar');
-                  I18nManager.forceRTL(true);
-                  I18nManager.swapLeftAndRightInRTL(true);
-                  closeMenu();
-                  setTimeout(() => {
-                    const currentPath = '/' + segments.join('/');
-                    if (currentPath && currentPath !== '/') {
-                      router.replace(currentPath as any);
-                    }
-                  }, 100);
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.langButtonText, i18n.locale === 'ar' && styles.langButtonTextActive]}>
-                  العربية
-                </Text>
-              </TouchableOpacity>
+            )}
+
+            {/* Regular Menu Items */}
+            {menuItems.map((item, index) => (
+              <React.Fragment key={item.route}>
+                {item.dividerBefore && <View style={styles.divider} />}
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => handleNavigate(item.route)}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name={item.icon as any} size={20} color="#000" style={styles.menuIcon} />
+                  <Text style={styles.menuText}>{item.label}</Text>
+                </TouchableOpacity>
+              </React.Fragment>
+            ))}
+
+            {/* Divider */}
+            <View style={styles.divider} />
+
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => handleNavigate('/signout')}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="log-out-outline" size={20} color="#ff3b30" style={styles.menuIcon} />
+              <Text style={[styles.menuText, styles.signOutText]}>
+                {i18n.t('signOut') || 'Sign Out'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Language Switcher */}
+            <View style={styles.languageSection}>
+              <Text style={styles.languageLabel}>{i18n.t('selectLanguage') || 'Select Language'}</Text>
+              <View style={styles.languageRow}>
+                <TouchableOpacity
+                  style={[styles.langButton, i18n.locale === 'en' && styles.langButtonActive]}
+                  onPress={async () => {
+                    i18n.locale = 'en';
+                    await AsyncStorage.setItem('appLang', 'en');
+                    I18nManager.forceRTL(false);
+                    I18nManager.swapLeftAndRightInRTL(false);
+                    closeMenu();
+                    setTimeout(() => {
+                      const currentPath = '/' + segments.join('/');
+                      if (currentPath && currentPath !== '/') {
+                        router.replace(currentPath as any);
+                      }
+                    }, 100);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.langButtonText, i18n.locale === 'en' && styles.langButtonTextActive]}>
+                    English
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.langButton, i18n.locale === 'ar' && styles.langButtonActive]}
+                  onPress={async () => {
+                    i18n.locale = 'ar';
+                    await AsyncStorage.setItem('appLang', 'ar');
+                    I18nManager.forceRTL(true);
+                    I18nManager.swapLeftAndRightInRTL(true);
+                    closeMenu();
+                    setTimeout(() => {
+                      const currentPath = '/' + segments.join('/');
+                      if (currentPath && currentPath !== '/') {
+                        router.replace(currentPath as any);
+                      }
+                    }, 100);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.langButtonText, i18n.locale === 'ar' && styles.langButtonTextActive]}>
+                    العربية
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        </ScrollView>
+          </ScrollView>
         </View>
       </View>
     </Modal>
