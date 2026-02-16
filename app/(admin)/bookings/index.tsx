@@ -33,9 +33,9 @@ export default function BookingsList() {
     const renderItem = ({ item }: { item: any }) => (
         <TouchableOpacity style={styles.card} onPress={() => router.push(`/(admin)/bookings/${item.id}` as any)}>
             <View style={styles.header}>
-                <Text style={styles.playerName}>{item.playerName}</Text>
-                <View style={[styles.statusBadge, { backgroundColor: item.status === 'confirmed' ? '#e1f7ec' : '#fef4e5' }]}>
-                    <Text style={[styles.statusText, { color: item.status === 'confirmed' ? '#1cc88a' : '#f6c23e' }]}>
+                <Text style={styles.playerName}>{item.customerName || item.playerName || 'Unknown Player'}</Text>
+                <View style={[styles.statusBadge, { backgroundColor: item.status === 'confirmed' ? '#e1f7ec' : item.status === 'cancelled' ? '#fee2e2' : '#fef4e5' }]}>
+                    <Text style={[styles.statusText, { color: item.status === 'confirmed' ? '#1cc88a' : item.status === 'cancelled' ? '#ef4444' : '#f6c23e' }]}>
                         {(item.status || 'pending').toUpperCase()}
                     </Text>
                 </View>
@@ -43,11 +43,11 @@ export default function BookingsList() {
             <View style={styles.details}>
                 <View style={styles.detailRow}>
                     <Ionicons name="business-outline" size={16} color="#666" />
-                    <Text style={styles.detailText}>{item.providerName}</Text>
+                    <Text style={styles.detailText}>{item.providerName || item.name || 'Unknown Provider'}</Text>
                 </View>
                 <View style={styles.detailRow}>
-                    <Ionicons name="fitness-outline" size={16} color="#666" />
-                    <Text style={styles.detailText}>{item.service}</Text>
+                    <Ionicons name={item.type === 'clinic' ? "medical-outline" : "fitness-outline"} size={16} color="#666" />
+                    <Text style={styles.detailText}>{item.service || item.program || 'General'}</Text>
                 </View>
                 <View style={styles.detailRow}>
                     <Ionicons name="calendar-outline" size={16} color="#666" />

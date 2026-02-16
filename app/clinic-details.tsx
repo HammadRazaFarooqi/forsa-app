@@ -18,19 +18,19 @@ export default function ClinicDetailsScreen() {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   let clinic = null;
   try {
-  clinic = params.clinic ? JSON.parse(params.clinic as string) : null;
+    clinic = params.clinic ? JSON.parse(params.clinic as string) : null;
 
-  // 👇 Parse working_hours if it's a string
-  if (clinic?.working_hours && typeof clinic.working_hours === 'string') {
-    try {
-      clinic.working_hours = JSON.parse(clinic.working_hours);
-    } catch (err) {
-      console.error('⚠️ Cannot parse working_hours:', err);
+    // 👇 Parse working_hours if it's a string
+    if (clinic?.working_hours && typeof clinic.working_hours === 'string') {
+      try {
+        clinic.working_hours = JSON.parse(clinic.working_hours);
+      } catch (err) {
+        console.error('⚠️ Cannot parse working_hours:', err);
+      }
     }
+  } catch (err) {
+    clinic = null;
   }
-} catch (err) {
-  clinic = null;
-}
 
   useEffect(() => {
     const loadFavorites = async () => {
@@ -75,13 +75,25 @@ export default function ClinicDetailsScreen() {
     // If no doctors available, still allow booking
     const selectedDoctor = doctorName || (doctors.length > 0 ? doctors[0].name : 'General Consultation');
     const selectedServiceName = serviceName || (services.length > 0 ? services[0].name : 'General Service');
-    const servicePrice = serviceName 
+    const servicePrice = serviceName
       ? (clinic[`${serviceName}_fee`] || 0)
       : (services.length > 0 ? services[0].fee : 0);
 
     try {
       setBookingLoading(true);
-      
+
+      // Fetch user name from Firestore
+      let playerName = user.displayName || 'Player';
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          playerName = userData.name || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || playerName;
+        }
+      } catch (err) {
+        console.log('Error fetching user name, using default');
+      }
+
       // Fetch clinic details from Firestore if available
       let clinicName = clinic.clinic_name || clinic.name || 'Clinic';
       let clinicCity = clinic.city || '';
@@ -102,7 +114,11 @@ export default function ClinicDetailsScreen() {
 
       const bookingData = {
         playerId: user.uid,
+        parentId: user.uid, // Add parentId for consistency with parent-bookings.tsx
+        playerName: playerName,
+        customerName: playerName, // Standardized field for admin
         providerId: clinicId || clinic.id || '',
+        providerName: clinicName,
         type: 'clinic',
         status: 'pending',
         date: new Date().toISOString().split('T')[0],
@@ -196,32 +212,32 @@ export default function ClinicDetailsScreen() {
             <Text style={[styles.feeType, { flex: 1, fontWeight: 'bold' }]}>Day</Text>
             <Text style={[styles.feeValue, { flex: 1, fontWeight: 'bold' }]}>Hours</Text>
           </View>
-  {timings && typeof timings === 'object' ? (
-  Object.entries(timings).map(([day, value]) => {
-    if (
-      value &&
-      typeof value === 'object'
-    ) {
-      const from = (value as any).from || '';
-      const to = (value as any).to || '';
-      const isOff = (value as any).off;
+          {timings && typeof timings === 'object' ? (
+            Object.entries(timings).map(([day, value]) => {
+              if (
+                value &&
+                typeof value === 'object'
+              ) {
+                const from = (value as any).from || '';
+                const to = (value as any).to || '';
+                const isOff = (value as any).off;
 
-      return (
-        <View key={day} style={styles.feeRow}>
-          <Text style={[styles.feeType, { flex: 1 }]}>
-            {day.charAt(0).toUpperCase() + day.slice(1)}
-          </Text>
-          <Text style={[styles.feeValue, { flex: 1 }]}>
-            {isOff || (!from && !to) ? 'Closed' : `${from} – ${to}`}
-          </Text>
-        </View>
-      );
-    }
-    return null;
-  })
-) : (
-  <Text style={styles.sectionText}>{i18n.t('noTimings') || 'No timings available.'}</Text>
-)}
+                return (
+                  <View key={day} style={styles.feeRow}>
+                    <Text style={[styles.feeType, { flex: 1 }]}>
+                      {day.charAt(0).toUpperCase() + day.slice(1)}
+                    </Text>
+                    <Text style={[styles.feeValue, { flex: 1 }]}>
+                      {isOff || (!from && !to) ? 'Closed' : `${from} – ${to}`}
+                    </Text>
+                  </View>
+                );
+              }
+              return null;
+            })
+          ) : (
+            <Text style={styles.sectionText}>{i18n.t('noTimings') || 'No timings available.'}</Text>
+          )}
 
 
         </View>
@@ -229,8 +245,8 @@ export default function ClinicDetailsScreen() {
         <View style={styles.sectionBox}>
           <Text style={styles.sectionTitle}>{i18n.t('doctors') || 'Doctors'}</Text>
           {doctors.map((doc: any, idx: number) => (
-            <TouchableOpacity 
-              key={idx} 
+            <TouchableOpacity
+              key={idx}
               style={styles.doctorCard}
               onPress={() => handleReserve(doc.name)}
               activeOpacity={0.7}
@@ -267,13 +283,13 @@ export default function ClinicDetailsScreen() {
           )) : <Text style={styles.sectionText}>{i18n.t('noServices') || 'No services listed.'}</Text>}
         </View>
         {/* Contact */}
-<View style={styles.sectionBox}>
-  <Text style={styles.sectionTitle}>{i18n.t('contact') || 'Contact'}</Text>
-  <Text style={styles.sectionText}>{clinic.phone}</Text>
-</View>
+        <View style={styles.sectionBox}>
+          <Text style={styles.sectionTitle}>{i18n.t('contact') || 'Contact'}</Text>
+          <Text style={styles.sectionText}>{clinic.phone}</Text>
+        </View>
 
-        <TouchableOpacity 
-          style={[styles.reserveBtn, bookingLoading && styles.reserveBtnDisabled]} 
+        <TouchableOpacity
+          style={[styles.reserveBtn, bookingLoading && styles.reserveBtnDisabled]}
           onPress={() => handleReserve()}
           disabled={bookingLoading}
         >
@@ -341,7 +357,7 @@ export default function ClinicDetailsScreen() {
 }
 
 const styles = StyleSheet.create({
-  
+
   container: { flex: 1, backgroundColor: '#f8f8f8', padding: 0 },
   headerBox: {
     alignItems: 'center',

@@ -68,9 +68,9 @@ export default function AcademyDetailsScreen() {
             images: data.images || [],
             profilePhoto: data.profilePhoto || '',
           });
-        setOfferings(data.offerings || []);
-        setPosts(data.posts || []);
-        setImages(data.images || []);
+          setOfferings(data.offerings || []);
+          setPosts(data.posts || []);
+          setImages(data.images || []);
         } else {
           // Fallback to parsed data
           setAcademy(parsed);
@@ -136,9 +136,26 @@ export default function AcademyDetailsScreen() {
 
     try {
       setBookingLoading(true);
+
+      // Fetch user name from Firestore
+      let playerName = user.displayName || 'Player';
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          playerName = userData.name || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || playerName;
+        }
+      } catch (err) {
+        console.log('Error fetching user name, using default');
+      }
+
       const bookingData = {
         playerId: user.uid,
+        parentId: user.uid, // Add parentId for consistency with parent-bookings.tsx
+        playerName: playerName,
+        customerName: playerName, // Standardized field for admin
         providerId: academy.id,
+        providerName: academy.name,
         type: 'academy',
         status: 'pending',
         date: new Date().toISOString().split('T')[0],
@@ -171,7 +188,7 @@ export default function AcademyDetailsScreen() {
         colors={['#000000', '#1a1a1a', '#2d2d2d']}
         style={styles.gradient}
       >
-        <ScrollView 
+        <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
@@ -195,15 +212,15 @@ export default function AcademyDetailsScreen() {
               <Text style={styles.locationText}>{academy.city}</Text>
             </View>
             {academy.phone && (
-              <TouchableOpacity 
-                style={styles.contactButton} 
+              <TouchableOpacity
+                style={styles.contactButton}
                 onPress={() => setShowPhone(!showPhone)}
               >
                 <Ionicons name="call-outline" size={20} color="#000" />
                 <Text style={styles.contactButtonText}>
                   {showPhone ? academy.phone : (i18n.t('showPhone') || 'Show Phone')}
                 </Text>
-        </TouchableOpacity>
+              </TouchableOpacity>
             )}
           </View>
 
@@ -225,7 +242,7 @@ export default function AcademyDetailsScreen() {
                   <Text style={styles.sectionTitle}>{i18n.t('address') || 'Address'}</Text>
                 </View>
                 <Text style={styles.addressText}>{academy.address}</Text>
-      </View>
+              </View>
             )}
 
             {/* Gallery Section */}
@@ -234,12 +251,12 @@ export default function AcademyDetailsScreen() {
                 <Text style={styles.sectionTitle}>{i18n.t('gallery') || 'Gallery'}</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gallery}>
                   {images.map((img: any, idx: number) => (
-            <Image
-              key={idx}
-              source={typeof img === 'string' ? { uri: img } : img}
+                    <Image
+                      key={idx}
+                      source={typeof img === 'string' ? { uri: img } : img}
                       style={styles.galleryImage}
-              resizeMode="cover"
-            />
+                      resizeMode="cover"
+                    />
                   ))}
                 </ScrollView>
               </View>
@@ -252,31 +269,31 @@ export default function AcademyDetailsScreen() {
                 <Text style={styles.sectionTitle}>{i18n.t('monthlyFees') || 'Monthly Fees'}</Text>
               </View>
               <View style={styles.feesContainer}>
-        {Object.entries(academy.fees).map(([age, fee]) => (
+                {Object.entries(academy.fees).map(([age, fee]) => (
                   <View key={age} style={styles.feeItem}>
                     <View style={styles.feeInfo}>
                       <Text style={styles.feeAgeLabel}>{i18n.t('age') || 'Age'}</Text>
                       <Text style={styles.feeAge}>{age} {i18n.t('years') || 'years'}</Text>
                     </View>
-            <Text style={styles.feeValue}>{String(fee)} EGP</Text>
+                    <Text style={styles.feeValue}>{String(fee)} EGP</Text>
                     <View style={styles.counterContainer}>
-                      <TouchableOpacity 
-                        style={styles.counterButton} 
+                      <TouchableOpacity
+                        style={styles.counterButton}
                         onPress={() => setCounters(prev => ({ ...prev, [age]: Math.max((prev[age] || 0) - 1, 0) }))}
                       >
                         <Ionicons name="remove" size={20} color="#000" />
-              </TouchableOpacity>
-              <Text style={styles.counterValue}>{counters[age] || 0}</Text>
-                      <TouchableOpacity 
-                        style={styles.counterButton} 
+                      </TouchableOpacity>
+                      <Text style={styles.counterValue}>{counters[age] || 0}</Text>
+                      <TouchableOpacity
+                        style={styles.counterButton}
                         onPress={() => setCounters(prev => ({ ...prev, [age]: (prev[age] || 0) + 1 }))}
                       >
                         <Ionicons name="add" size={20} color="#000" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        ))}
-      </View>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+              </View>
               {total > 0 && (
                 <View style={styles.totalContainer}>
                   <Text style={styles.totalLabel}>{i18n.t('totalToPay') || 'Total to Pay'}</Text>
@@ -285,39 +302,39 @@ export default function AcademyDetailsScreen() {
               )}
             </View>
 
-      {/* Offerings/Services Section */}
-      {offerings.length > 0 && (
+            {/* Offerings/Services Section */}
+            {offerings.length > 0 && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Ionicons name="star-outline" size={20} color="#000" />
                   <Text style={styles.sectionTitle}>{i18n.t('offerings') || 'Services & Offerings'}</Text>
                 </View>
                 <View style={styles.offeringsContainer}>
-          {offerings.map((off, idx) => (
+                  {offerings.map((off, idx) => (
                     <View key={idx} style={styles.offeringItem}>
                       <Ionicons name="checkmark-circle" size={20} color="#000" />
                       <Text style={styles.offeringText}>{off}</Text>
                     </View>
-          ))}
+                  ))}
                 </View>
-        </View>
-      )}
+              </View>
+            )}
 
-      {/* Posts Section */}
-      {posts.length > 0 && (
+            {/* Posts Section */}
+            {posts.length > 0 && (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>{i18n.t('posts') || 'Latest Posts'}</Text>
-          {posts.map((post, idx) => (
+                {posts.map((post, idx) => (
                   <View key={idx} style={styles.postCard}>
-              {post.image && (
+                    {post.image && (
                       <Image source={{ uri: post.image }} style={styles.postImage} resizeMode="cover" />
-              )}
+                    )}
                     <Text style={styles.postTitle}>{post.title}</Text>
                     <Text style={styles.postBody}>{post.body}</Text>
-            </View>
-          ))}
-        </View>
-      )}
+                  </View>
+                ))}
+              </View>
+            )}
 
             {/* Age Selection for Booking */}
             <View style={styles.bookingSection}>
@@ -394,8 +411,8 @@ export default function AcademyDetailsScreen() {
             </Modal>
 
             {/* Reserve Button */}
-            <TouchableOpacity 
-              style={[styles.reserveButton, (!selectedAge || bookingLoading) && styles.reserveButtonDisabled]} 
+            <TouchableOpacity
+              style={[styles.reserveButton, (!selectedAge || bookingLoading) && styles.reserveButtonDisabled]}
               onPress={handleReserve}
               disabled={!selectedAge || bookingLoading}
             >
@@ -409,9 +426,9 @@ export default function AcademyDetailsScreen() {
                   }
                 </Text>
               )}
-          </TouchableOpacity>
-        </View>
-    </ScrollView>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </LinearGradient>
     </View>
   );
