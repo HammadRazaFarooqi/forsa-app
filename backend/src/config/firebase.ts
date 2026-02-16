@@ -7,7 +7,7 @@ import fs from 'fs';
 if (!admin.apps.length) {
   try {
     // File path to your service account JSON
-    const serviceAccountPath = path.join(__dirname, 'forsa-2923d-firebase-adminsdk-fbsvc-3c39df6d41.json');
+    const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
 
     if (!fs.existsSync(serviceAccountPath)) {
       throw new Error('Firebase service account JSON not found at ' + serviceAccountPath);

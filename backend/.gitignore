@@ -39,4 +39,4 @@ firebase-debug.log
 coverage/
 .nyc_output/
 
-forsa-2923d-firebase-adminsdk-fbsvc-3c39df6d41.json
+serviceAccountKey.json
