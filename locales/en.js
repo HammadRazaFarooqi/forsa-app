@@ -241,6 +241,7 @@ export default {
   showPhone: "Show phone",
   chat: "Chat",
   noBookings: "No bookings found",
+  bookingsWillAppear: "Your bookings will appear here",
   academy: "Academy",
   clinic: "Clinic",
   serviceFees: "Service fees",

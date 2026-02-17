@@ -314,6 +314,7 @@ export default {
   showPhone: "عرض رقم الهاتف",
   chat: "محادثة",
   noBookings: "لا توجد حجوزات",
+  bookingsWillAppear: "ستظهر حجوزاتك هنا",
   ACADEMY: "أكاديمية",
   CLINIC: "عيادة",
   serviceFees: "رسوم الخدمة",
