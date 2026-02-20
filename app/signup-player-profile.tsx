@@ -34,6 +34,9 @@ import {
 } from '../lib/validations';
 import i18n from '../locales/i18n';
 
+import OTPModal from '../components/OTPModal';
+import { BACKEND_URL } from '../lib/config';
+
 const POSITIONS = [
   'GK', 'LB', 'CB', 'RB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST'
 ];
@@ -73,7 +76,11 @@ const SignupPlayer = () => {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [missing, setMissing] = useState<{[key: string]: boolean}>({});
+  const [missing, setMissing] = useState<{ [key: string]: boolean }>({});
+
+  // OTP Modal State
+  const [modalVisible, setModalVisible] = useState(false);
+  const [otpDocId, setOtpDocId] = useState('');
 
   // Animation for transitions
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -108,7 +115,7 @@ const SignupPlayer = () => {
   // Real-time validation
   const validateField = (field: string, value: any) => {
     let error: string | null = null;
-    
+
     switch (field) {
       case 'firstName':
         error = validateName(value, 'First name');
@@ -153,7 +160,7 @@ const SignupPlayer = () => {
         // National ID photo is optional
         break;
     }
-    
+
     if (error) {
       setErrors(prev => ({ ...prev, [field]: error }));
       setMissing(prev => ({ ...prev, [field]: true }));
@@ -174,20 +181,20 @@ const SignupPlayer = () => {
 
   const validate = () => {
     const newErrors: Errors = {};
-    const newMissing: {[key: string]: boolean} = {};
-    
+    const newMissing: { [key: string]: boolean } = {};
+
     const firstNameError = validateName(firstName, 'First name');
     if (firstNameError) {
       newErrors.firstName = firstNameError;
       newMissing.firstName = true;
     }
-    
+
     const lastNameError = validateName(lastName, 'Last name');
     if (lastNameError) {
       newErrors.lastName = lastNameError;
       newMissing.lastName = true;
     }
-    
+
     if (!dob) {
       newErrors.dob = 'Date of birth is required';
       newMissing.dob = true;
@@ -199,13 +206,13 @@ const SignupPlayer = () => {
         newMissing.dob = true;
       }
     }
-    
+
     const positionError = validateRequired(position, 'Position');
     if (positionError) {
       newErrors.position = positionError;
       newMissing.position = true;
     }
-    
+
     // Email is optional - only validate if provided
     if (email && email.trim().length > 0) {
       const emailError = validateEmail(email);
@@ -214,124 +221,161 @@ const SignupPlayer = () => {
         newMissing.email = true;
       }
     }
-    
+
     // Phone is now required
     const phoneError = validatePhone(phone);
     if (phoneError) {
       newErrors.phone = phoneError;
       newMissing.phone = true;
     }
-    
+
     const passwordError = validatePassword(password);
     if (passwordError) {
       newErrors.password = passwordError;
       newMissing.password = true;
     }
-    
+
     const cityError = validateCity(city);
     if (cityError) {
       newErrors.city = cityError;
       newMissing.city = true;
     }
-    
+
     // Profile photo is optional
     // National ID photo is optional
-    
+
     setErrors(newErrors);
     setMissing(newMissing);
     return Object.keys(newErrors).length === 0;
   };
 
 
-const handleSignup = async () => {
-  if (!validate()) {
-    Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
-    return;
-  }
-
-  try {
-    setLoading(true);
-    setFormError('');
-
-    const dobString = formatDateForDB(dob);
-
-    // Step 1: Create Firebase Auth user
-    // Generate email from phone if email not provided (Firebase requires email)
-    // Clean phone number (remove spaces, dashes, parentheses, dots, and + sign) - keep only digits
-    const cleanedPhone = phone.replace(/[\s\-\(\)\.\+]/g, '');
-    const authEmail = email && email.trim().length > 0 
-      ? email.trim() 
-      : `user_${cleanedPhone}@forsa.app`;
-    
-    const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
-    const user = userCredential.user;
-
-    // Step 2: Upload images to AWS S3
-    let profilePhotoUrl = '';
-    let nationalIdPhotoUrl = '';
-
-    if (profilePhoto) {
-      profilePhotoUrl = await uploadImageToS3(
-        profilePhoto,
-        `users/${user.uid}/profile.jpg`
-      );
+  const handleSignup = async () => {
+    if (!validate()) {
+      Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
+      return;
     }
 
-    if (nationalIdPhoto) {
-      nationalIdPhotoUrl = await uploadImageToS3(
-        nationalIdPhoto,
-        `users/${user.uid}/nationalId.jpg`
-      );
+    try {
+      setLoading(true);
+      setFormError('');
+
+      // Step 1: Send OTP FIRST (No user created yet)
+      const cleanedPhone = phone.replace(/[\s\-\(\)\.\+]/g, '');
+      const otpRes = await fetch(`${BACKEND_URL}/api/otp/send-phone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      const otpData = await otpRes.json();
+
+      if (!otpData.success) {
+        setFormError(otpData.error || 'Failed to send OTP. Please check your phone number.');
+        setLoading(false);
+        return;
+      }
+
+      // OTP Sent Successfully
+      setOtpDocId(otpData.docId);
+      setLoading(false);
+      setModalVisible(true);
+
+      // Dev mode alert
+      if (otpData.devOtp) {
+        Alert.alert('Dev OTP', `Your code is: ${otpData.devOtp}`);
+      }
+
+    } catch (err: any) {
+      console.error('❌ Signup Error:', err);
+      setFormError('Network error. Please check your connection.');
+      setLoading(false);
     }
+  };
 
-    // Step 3: Save user data to Firestore
-    const userData = {
-      uid: user.uid,
-      role: 'player',
-      email: email && email.trim().length > 0 ? email.trim() : null,
-      phone: phone,
-      firstName: firstName,
-      lastName: lastName,
-      dob: dobString,
-      preferredFoot: preferredFoot,
-      position: position,
-      altPositions: altPositions,
-      city: city,
-      profilePhoto: profilePhotoUrl,
-      nationalIdPhoto: nationalIdPhotoUrl,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+  const handleVerifySuccess = async () => {
+    setModalVisible(false);
+    setLoading(true); // Restart loading for account creation
 
-    // Save to users collection
-    await setDoc(doc(db, 'users', user.uid), userData);
+    try {
+      const dobString = formatDateForDB(dob);
 
-    // Also save to role-specific collection
-    await setDoc(doc(db, 'players', user.uid), {
-      ...userData,
-      highlightVideo: highlightVideo || '',
-    });
+      // Step 2: Create Firebase Auth user (Only after OTP verification)
+      const cleanedPhone = phone.replace(/[\s\-\(\)\.\+]/g, '');
+      const authEmail = email && email.trim().length > 0
+        ? email.trim()
+        : `user_${cleanedPhone}@forsa.app`;
 
-    // Success - navigate to player feed
+      const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
+      const user = userCredential.user;
+
+      // Step 3: Upload images to AWS S3
+      let profilePhotoUrl = '';
+      let nationalIdPhotoUrl = '';
+
+      if (profilePhoto) {
+        profilePhotoUrl = await uploadImageToS3(
+          profilePhoto,
+          `users/${user.uid}/profile.jpg`
+        );
+      }
+
+      if (nationalIdPhoto) {
+        nationalIdPhotoUrl = await uploadImageToS3(
+          nationalIdPhoto,
+          `users/${user.uid}/nationalId.jpg`
+        );
+      }
+
+      // Step 4: Save user data to Firestore
+      const userData = {
+        uid: user.uid,
+        role: 'player',
+        email: email && email.trim().length > 0 ? email.trim() : null,
+        phone: phone,
+        firstName: firstName,
+        lastName: lastName,
+        dob: dobString,
+        preferredFoot: preferredFoot,
+        position: position,
+        altPositions: altPositions,
+        city: city,
+        profilePhoto: profilePhotoUrl,
+        nationalIdPhoto: nationalIdPhotoUrl,
+        phoneVerified: true, // Mark as true immediately since we just verified
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Save to users collection
+      await setDoc(doc(db, 'users', user.uid), userData);
+
+      // Also save to role-specific collection
+      await setDoc(doc(db, 'players', user.uid), {
+        ...userData,
+        highlightVideo: highlightVideo || '',
+      });
+
+      // Navigate to Feed
       router.replace('/player-feed');
-  } catch (err: any) {
-    let errorMsg = i18n.t('signupFailedMessage');
-    if (err.code === 'auth/email-already-in-use') {
-      errorMsg = i18n.t('emailAlreadyRegistered');
-    } else if (err.code === 'auth/invalid-email') {
-      errorMsg = i18n.t('invalidEmailAddress');
-    } else if (err.code === 'auth/weak-password') {
-      errorMsg = i18n.t('weakPassword');
-    } else if (err.message) {
-      errorMsg = err.message;
+
+    } catch (err: any) {
+      let errorMsg = i18n.t('signupFailedMessage');
+      if (err.code === 'auth/email-already-in-use') {
+        errorMsg = i18n.t('emailAlreadyRegistered');
+      } else if (err.code === 'auth/invalid-email') {
+        errorMsg = i18n.t('invalidEmailAddress');
+      } else if (err.code === 'auth/weak-password') {
+        errorMsg = i18n.t('weakPassword');
+      } else if (err.message) {
+        errorMsg = err.message;
+      }
+      console.error('❌ Account Creation Error:', err);
+      setFormError(errorMsg);
+      Alert.alert(i18n.t('signupFailed'), errorMsg);
+    } finally {
+      setLoading(false);
     }
-    console.error('❌ Signup Error:', err);
-    setFormError(errorMsg);
-    Alert.alert(i18n.t('signupFailed'), errorMsg || i18n.t('signupFailedMessage'));
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
 
 
@@ -392,7 +436,7 @@ const handleSignup = async () => {
         colors={['#000000', '#1a1a1a', '#2d2d2d']}
         style={styles.gradient}
       >
-      <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+        <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.backButton} onPress={handleBack}>
@@ -404,12 +448,12 @@ const handleSignup = async () => {
             </View>
           </View>
 
-          <ScrollView 
-            contentContainerStyle={styles.scrollContent} 
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-          {formError && (
+            {formError && (
               <View style={styles.errorContainer}>
                 <Ionicons name="alert-circle" size={16} color="#ff3b30" />
                 <Text style={styles.errorSubmitText}>{formError}</Text>
@@ -445,13 +489,13 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={firstName}
-                    onChangeText={t => { setFirstName(t); if (missing.firstName) setMissing(m => ({...m, firstName: false})); validateField('firstName', t); }}
+                    onChangeText={t => { setFirstName(t); if (missing.firstName) setMissing(m => ({ ...m, firstName: false })); validateField('firstName', t); }}
                     autoCapitalize="words"
                     placeholder={i18n.t('first_name_ph')}
                     placeholderTextColor="#999"
                   />
-          </View>
-          {errors.firstName && <Text style={styles.errorText}>{errors.firstName}</Text>}
+                </View>
+                {errors.firstName && <Text style={styles.errorText}>{errors.firstName}</Text>}
               </View>
 
               <View style={styles.inputGroup}>
@@ -464,12 +508,12 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={lastName}
-                    onChangeText={t => { setLastName(t); if (missing.lastName) setMissing(m => ({...m, lastName: false})); validateField('lastName', t); }}
+                    onChangeText={t => { setLastName(t); if (missing.lastName) setMissing(m => ({ ...m, lastName: false })); validateField('lastName', t); }}
                     autoCapitalize="words"
                     placeholder={i18n.t('last_name_ph')}
                     placeholderTextColor="#999"
                   />
-            </View>
+                </View>
                 {errors.lastName && <Text style={styles.errorText}>{errors.lastName}</Text>}
               </View>
 
@@ -533,34 +577,34 @@ const handleSignup = async () => {
                   {i18n.t('position')}
                   <Text style={styles.required}> *</Text>
                 </Text>
-          <View style={styles.positionsRow}>
-            {POSITIONS.map(pos => (
-              <TouchableOpacity
-                key={pos}
-                style={[styles.positionBtn, position === pos && styles.positionBtnSelected]}
-                      onPress={() => { setPosition(pos); if (missing.position) setMissing(m => ({...m, position: false})); validateField('position', pos); }}
-              >
-                <Text style={[styles.positionBtnText, position === pos && styles.positionBtnTextSelected]}>{i18n.t(pos)}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {errors.position && <Text style={styles.errorText}>{errors.position}</Text>}
+                <View style={styles.positionsRow}>
+                  {POSITIONS.map(pos => (
+                    <TouchableOpacity
+                      key={pos}
+                      style={[styles.positionBtn, position === pos && styles.positionBtnSelected]}
+                      onPress={() => { setPosition(pos); if (missing.position) setMissing(m => ({ ...m, position: false })); validateField('position', pos); }}
+                    >
+                      <Text style={[styles.positionBtnText, position === pos && styles.positionBtnTextSelected]}>{i18n.t(pos)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {errors.position && <Text style={styles.errorText}>{errors.position}</Text>}
               </View>
 
               <View style={styles.inputGroup}>
-          <Text style={styles.label}>{i18n.t('alternate_positions')}</Text>
-          <View style={styles.positionsRow}>
-            {POSITIONS.map(pos => (
-              <TouchableOpacity
-                key={pos}
-                style={[styles.positionBtn, altPositions.includes(pos) && styles.positionBtnSelected]}
-                onPress={() => handleAltPositionToggle(pos)}
-              >
-                <Text style={[styles.positionBtnText, altPositions.includes(pos) && styles.positionBtnTextSelected]}>{i18n.t(pos)}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          </View>
+                <Text style={styles.label}>{i18n.t('alternate_positions')}</Text>
+                <View style={styles.positionsRow}>
+                  {POSITIONS.map(pos => (
+                    <TouchableOpacity
+                      key={pos}
+                      style={[styles.positionBtn, altPositions.includes(pos) && styles.positionBtnSelected]}
+                      onPress={() => handleAltPositionToggle(pos)}
+                    >
+                      <Text style={[styles.positionBtnText, altPositions.includes(pos) && styles.positionBtnTextSelected]}>{i18n.t(pos)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>
@@ -578,7 +622,7 @@ const handleSignup = async () => {
                   <Ionicons name="chevron-down" size={20} color="#999" />
                 </TouchableOpacity>
                 {errors.city && <Text style={styles.errorText}>{errors.city}</Text>}
-                
+
                 {/* City Selection Modal */}
                 <Modal
                   visible={showCityModal}
@@ -605,7 +649,7 @@ const handleSignup = async () => {
                             style={[styles.cityOption, city === key && styles.cityOptionSelected]}
                             onPress={() => {
                               setCity(key);
-                              if (missing.city) setMissing(m => ({...m, city: false}));
+                              if (missing.city) setMissing(m => ({ ...m, city: false }));
                               validateField('city', key);
                               setShowCityModal(false);
                             }}
@@ -636,8 +680,8 @@ const handleSignup = async () => {
                     placeholder={i18n.t('highlight_video_ph')}
                     placeholderTextColor="#999"
                   />
-            </View>
-          </View>
+                </View>
+              </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>
@@ -649,7 +693,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={phone}
-                    onChangeText={t => { setPhone(t); if (missing.phone) setMissing(m => ({...m, phone: false})); validateField('phone', t); }}
+                    onChangeText={t => { setPhone(t); if (missing.phone) setMissing(m => ({ ...m, phone: false })); validateField('phone', t); }}
                     keyboardType="phone-pad"
                     placeholder={i18n.t('phone_ph')}
                     placeholderTextColor="#999"
@@ -667,9 +711,9 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={email}
-                    onChangeText={t => { 
-                      setEmail(t); 
-                      if (missing.email) setMissing(m => ({...m, email: false})); 
+                    onChangeText={t => {
+                      setEmail(t);
+                      if (missing.email) setMissing(m => ({ ...m, email: false }));
                       // Only validate if email is provided
                       if (t && t.trim().length > 0) {
                         validateField('email', t);
@@ -706,21 +750,21 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={password}
-                    onChangeText={t => { setPassword(t); if (missing.password) setMissing(m => ({...m, password: false})); validateField('password', t); }}
+                    onChangeText={t => { setPassword(t); if (missing.password) setMissing(m => ({ ...m, password: false })); validateField('password', t); }}
                     secureTextEntry
                     placeholder={i18n.t('password_ph')}
                     placeholderTextColor="#999"
                   />
-          </View>
-          {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
-          </View>
+                </View>
+                {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
+              </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>
                   {i18n.t('national_id_photo')}
                 </Text>
                 <TouchableOpacity onPress={pickNationalIdPhoto} style={styles.nationalIdContainer}>
-            {nationalIdPhoto ? (
+                  {nationalIdPhoto ? (
                     <Image source={{ uri: nationalIdPhoto }} style={styles.nationalIdImage} />
                   ) : (
                     <View style={styles.nationalIdPlaceholder}>
@@ -742,11 +786,20 @@ const handleSignup = async () => {
                 ) : (
                   <Text style={styles.signupButtonText}>{i18n.t('signup')}</Text>
                 )}
-          </TouchableOpacity>
+              </TouchableOpacity>
             </View>
-        </ScrollView>
-      </Animated.View>
+          </ScrollView>
+        </Animated.View>
       </LinearGradient>
+
+      {/* OTP Modal */}
+      <OTPModal
+        visible={modalVisible}
+        phone={phone}
+        docId={otpDocId}
+        onClose={() => { setModalVisible(false); setLoading(false); }}
+        onVerifySuccess={handleVerifySuccess}
+      />
     </KeyboardAvoidingView>
   );
 };

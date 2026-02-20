@@ -30,6 +30,9 @@ import {
 } from '../lib/validations';
 import i18n from '../locales/i18n';
 
+import OTPModal from '../components/OTPModal';
+import { BACKEND_URL } from '../lib/config';
+
 const cities = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>);
 
 interface Errors {
@@ -57,8 +60,13 @@ const SignupParent = () => {
   const [showCityModal, setShowCityModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
-  const [missing, setMissing] = useState<{[key: string]: boolean}>({});
+  const [missing, setMissing] = useState<{ [key: string]: boolean }>({});
   const [formError, setFormError] = useState<string | null>(null);
+
+  // OTP Modal State
+  const [modalVisible, setModalVisible] = useState(false);
+  const [otpDocId, setOtpDocId] = useState('');
+
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
@@ -80,14 +88,14 @@ const SignupParent = () => {
 
   const validate = () => {
     const newErrors: Errors = {};
-    const newMissing: {[key: string]: boolean} = {};
-    
+    const newMissing: { [key: string]: boolean } = {};
+
     const parentNameError = validateName(parentName, 'Parent name');
     if (parentNameError) {
       newErrors.parentName = parentNameError;
       newMissing.parentName = true;
     }
-    
+
     // Email is optional - only validate if provided
     if (email && email.trim().length > 0) {
       const emailError = validateEmail(email);
@@ -96,20 +104,20 @@ const SignupParent = () => {
         newMissing.email = true;
       }
     }
-    
+
     // Phone is now required
     const phoneError = validatePhone(phone);
     if (phoneError) {
       newErrors.phone = phoneError;
       newMissing.phone = true;
     }
-    
+
     const passwordError = validatePassword(password);
     if (passwordError) {
       newErrors.password = passwordError;
       newMissing.password = true;
     }
-    
+
     if (!confirmPassword) {
       newErrors.confirmPassword = i18n.t('confirm_password_required') || 'Confirm password is required';
       newMissing.confirmPassword = true;
@@ -117,13 +125,13 @@ const SignupParent = () => {
       newErrors.confirmPassword = i18n.t('password_mismatch') || 'Passwords do not match';
       newMissing.confirmPassword = true;
     }
-    
+
     const cityError = validateCity(city);
     if (cityError) {
       newErrors.city = cityError;
       newMissing.city = true;
     }
-    
+
     if (!children[0] || children.some((c) => !c.trim())) {
       newErrors.children = 'At least one child name is required';
       newMissing.children = true;
@@ -132,78 +140,115 @@ const SignupParent = () => {
       newErrors.childAges = 'At least one child age is required';
       newMissing.childAges = true;
     }
-    
+
     setErrors(newErrors);
     setMissing(newMissing);
     return Object.keys(newErrors).length === 0;
   };
 
-const handleSignup = async () => {
-  if (!validate()) {
-    Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
-    return;
-  }
-
-  try {
-    setLoading(true);
-    setFormError('');
-
-    // Step 1: Create Firebase Auth user
-    // Generate email from phone if email not provided (Firebase requires email)
-    // Clean phone number (remove spaces, dashes, parentheses, dots, and + sign) - keep only digits
-    const cleanedPhone = phone.replace(/[\s\-\(\)\.\+]/g, '');
-    const authEmail = email && email.trim().length > 0 
-      ? email.trim() 
-      : `user_${cleanedPhone}@forsa.app`;
-    
-    const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
-    const user = userCredential.user;
-
-    // Step 2: Prepare children data
-    const childrenData = children.map((name, idx) => ({
-      name: name.trim(),
-      age: childAges[idx] || '',
-    })).filter(child => child.name && child.age);
-
-    // Step 3: Save user data to Firestore
-    const userData = {
-      uid: user.uid,
-      role: 'parent',
-      email: email && email.trim().length > 0 ? email.trim() : null,
-      phone: phone,
-      parentName: parentName,
-      city: city,
-      children: childrenData,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    // Save to users collection
-    await setDoc(doc(db, 'users', user.uid), userData);
-
-    // Also save to role-specific collection
-    await setDoc(doc(db, 'parents', user.uid), userData);
-
-    Alert.alert(i18n.t('signupSuccessful'));
-    router.replace('/parent-feed');
-  } catch (err: any) {
-    let errorMsg = i18n.t('signupFailedMessage');
-    if (err.code === 'auth/email-already-in-use') {
-      errorMsg = i18n.t('emailAlreadyRegistered');
-    } else if (err.code === 'auth/invalid-email') {
-      errorMsg = i18n.t('invalidEmailAddress');
-    } else if (err.code === 'auth/weak-password') {
-      errorMsg = i18n.t('weakPassword');
-    } else if (err.message) {
-      errorMsg = err.message;
+  const handleSignup = async () => {
+    if (!validate()) {
+      Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
+      return;
     }
-    console.error('❌ Signup error:', err);
-    setFormError(errorMsg);
-    Alert.alert('Error', errorMsg);
-  } finally {
-    setLoading(false);
-  }
-};
+
+    try {
+      setLoading(true);
+      setFormError('');
+
+      // Step 1: Send OTP FIRST
+      const cleanedPhone = phone.replace(/[\s\-\(\)\.\+]/g, '');
+      const otpRes = await fetch(`${BACKEND_URL}/api/otp/send-phone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      const otpData = await otpRes.json();
+
+      if (!otpData.success) {
+        setFormError(otpData.error || 'Failed to send OTP. Please check your phone number.');
+        setLoading(false);
+        return;
+      }
+
+      // OTP Sent Successfully
+      setOtpDocId(otpData.docId);
+      setLoading(false);
+      setModalVisible(true);
+
+      // Dev mode alert
+      if (otpData.devOtp) {
+        Alert.alert('Dev OTP', `Your code is: ${otpData.devOtp}`);
+      }
+
+    } catch (err: any) {
+      console.error('❌ Signup error:', err);
+      setFormError('Network error. Please check your connection.');
+      setLoading(false);
+    }
+  };
+
+  const handleVerifySuccess = async () => {
+    setModalVisible(false);
+    setLoading(true);
+
+    try {
+      // Step 2: Create Firebase Auth user (Only after OTP verification)
+      const cleanedPhone = phone.replace(/[\s\-\(\)\.\+]/g, '');
+      const authEmail = email && email.trim().length > 0
+        ? email.trim()
+        : `user_${cleanedPhone}@forsa.app`;
+
+      const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
+      const user = userCredential.user;
+
+      // Step 3: Prepare children data
+      const childrenData = children.map((name, idx) => ({
+        name: name.trim(),
+        age: childAges[idx] || '',
+      })).filter(child => child.name && child.age);
+
+      // Step 4: Save user data to Firestore
+      const userData = {
+        uid: user.uid,
+        role: 'parent',
+        email: email && email.trim().length > 0 ? email.trim() : null,
+        phone: phone,
+        parentName: parentName,
+        city: city,
+        children: childrenData,
+        phoneVerified: true, // Verified
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Save to users collection
+      await setDoc(doc(db, 'users', user.uid), userData);
+
+      // Also save to role-specific collection
+      await setDoc(doc(db, 'parents', user.uid), userData);
+
+      // Navigate to Parent Feed
+      router.replace('/parent-feed');
+
+    } catch (err: any) {
+      let errorMsg = i18n.t('signupFailedMessage');
+      if (err.code === 'auth/email-already-in-use') {
+        errorMsg = i18n.t('emailAlreadyRegistered');
+      } else if (err.code === 'auth/invalid-email') {
+        errorMsg = i18n.t('invalidEmailAddress');
+      } else if (err.code === 'auth/weak-password') {
+        errorMsg = i18n.t('weakPassword');
+      } else if (err.message) {
+        errorMsg = err.message;
+      }
+      console.error('❌ Signup error:', err);
+      setFormError(errorMsg);
+      Alert.alert('Error', errorMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
 
 
 
@@ -245,13 +290,13 @@ const handleSignup = async () => {
               <Ionicons name="arrow-back" size={24} color="#fff" />
             </TouchableOpacity>
             <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>{i18n.t('signup_parent')}</Text>
-            <Text style={styles.headerSubtitle}>{i18n.t('createYourParentAccount') || 'Create your parent account'}</Text>
+              <Text style={styles.headerTitle}>{i18n.t('signup_parent')}</Text>
+              <Text style={styles.headerSubtitle}>{i18n.t('createYourParentAccount') || 'Create your parent account'}</Text>
             </View>
           </View>
 
-          <ScrollView 
-            contentContainerStyle={styles.scrollContent} 
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
@@ -274,7 +319,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={parentName}
-                    onChangeText={t => { setParentName(t); if (missing.parentName) setMissing(m => ({...m, parentName: false})); }}
+                    onChangeText={t => { setParentName(t); if (missing.parentName) setMissing(m => ({ ...m, parentName: false })); }}
                     autoCapitalize="words"
                     placeholder={i18n.t('parent_name_ph')}
                     placeholderTextColor="#999"
@@ -293,7 +338,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={phone}
-                    onChangeText={t => { setPhone(t); if (missing.phone) setMissing(m => ({...m, phone: false})); }}
+                    onChangeText={t => { setPhone(t); if (missing.phone) setMissing(m => ({ ...m, phone: false })); }}
                     keyboardType="phone-pad"
                     placeholder={i18n.t('phone_ph')}
                     placeholderTextColor="#999"
@@ -311,9 +356,9 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={email}
-                    onChangeText={t => { 
-                      setEmail(t); 
-                      if (missing.email) setMissing(m => ({...m, email: false})); 
+                    onChangeText={t => {
+                      setEmail(t);
+                      if (missing.email) setMissing(m => ({ ...m, email: false }));
                       // Clear error if field is empty (since it's optional)
                       if (!t || t.trim().length === 0) {
                         setErrors(prev => {
@@ -347,7 +392,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={password}
-                    onChangeText={t => { setPassword(t); if (missing.password) setMissing(m => ({...m, password: false})); }}
+                    onChangeText={t => { setPassword(t); if (missing.password) setMissing(m => ({ ...m, password: false })); }}
                     secureTextEntry
                     placeholder={i18n.t('password_ph')}
                     placeholderTextColor="#999"
@@ -366,7 +411,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={confirmPassword}
-                    onChangeText={t => { setConfirmPassword(t); if (missing.confirmPassword) setMissing(m => ({...m, confirmPassword: false})); }}
+                    onChangeText={t => { setConfirmPassword(t); if (missing.confirmPassword) setMissing(m => ({ ...m, confirmPassword: false })); }}
                     secureTextEntry
                     placeholder={i18n.t('confirm_password_placeholder') || i18n.t('confirm_password_ph') || 'Confirm your password'}
                     placeholderTextColor="#999"
@@ -391,7 +436,7 @@ const handleSignup = async () => {
                   <Ionicons name="chevron-down" size={20} color="#999" />
                 </TouchableOpacity>
                 {errors.city && <Text style={styles.errorText}>{errors.city}</Text>}
-                
+
                 {/* City Selection Modal */}
                 <Modal
                   visible={showCityModal}
@@ -412,13 +457,13 @@ const handleSignup = async () => {
                         </TouchableOpacity>
                       </View>
                       <ScrollView style={styles.modalScrollView} showsVerticalScrollIndicator={true}>
-                    {cities.map(([key, label]) => (
+                        {cities.map(([key, label]) => (
                           <TouchableOpacity
                             key={key}
                             style={[styles.cityOption, city === key && styles.cityOptionSelected]}
                             onPress={() => {
                               setCity(key);
-                              if (missing.city) setMissing(m => ({...m, city: false}));
+                              if (missing.city) setMissing(m => ({ ...m, city: false }));
                               setShowCityModal(false);
                             }}
                           >
@@ -431,7 +476,7 @@ const handleSignup = async () => {
                           </TouchableOpacity>
                         ))}
                       </ScrollView>
-                </View>
+                    </View>
                   </TouchableOpacity>
                 </Modal>
               </View>
@@ -511,6 +556,15 @@ const handleSignup = async () => {
           </ScrollView>
         </Animated.View>
       </LinearGradient>
+
+      {/* OTP Modal */}
+      <OTPModal
+        visible={modalVisible}
+        phone={phone}
+        docId={otpDocId}
+        onClose={() => { setModalVisible(false); setLoading(false); }}
+        onVerifySuccess={handleVerifySuccess}
+      />
     </KeyboardAvoidingView>
   );
 };

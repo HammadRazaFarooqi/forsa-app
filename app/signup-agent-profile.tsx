@@ -33,6 +33,9 @@ import {
 } from '../lib/validations';
 import i18n from '../locales/i18n';
 
+import OTPModal from '../components/OTPModal';
+import { BACKEND_URL } from '../lib/config';
+
 
 interface Errors {
   firstName?: string;
@@ -58,10 +61,15 @@ const SignupAgent = () => {
   const [showCityModal, setShowCityModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
-  const [missing, setMissing] = useState<{[key: string]: boolean}>({});
+  const [missing, setMissing] = useState<{ [key: string]: boolean }>({});
   const [formError, setFormError] = useState<string | null>(null);
+
+  // OTP Modal State
+  const [modalVisible, setModalVisible] = useState(false);
+  const [otpDocId, setOtpDocId] = useState('');
+
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  
+
   const cityOptions = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>).map(([key, label]) => ({ key, label }));
 
   React.useEffect(() => {
@@ -75,20 +83,20 @@ const SignupAgent = () => {
 
   const validate = () => {
     const newErrors: Errors = {};
-    const newMissing: {[key: string]: boolean} = {};
-    
+    const newMissing: { [key: string]: boolean } = {};
+
     const firstNameError = validateName(firstName, 'First name');
     if (firstNameError) {
       newErrors.firstName = firstNameError;
       newMissing.firstName = true;
     }
-    
+
     const lastNameError = validateName(lastName, 'Last name');
     if (lastNameError) {
       newErrors.lastName = lastNameError;
       newMissing.lastName = true;
     }
-    
+
     // Email is optional - only validate if provided
     if (email && email.trim().length > 0) {
       const emailError = validateEmail(email);
@@ -97,28 +105,28 @@ const SignupAgent = () => {
         newMissing.email = true;
       }
     }
-    
+
     // Phone is now required
     const phoneError = validatePhone(phone);
     if (phoneError) {
       newErrors.phone = phoneError;
       newMissing.phone = true;
     }
-    
+
     const cityError = validateCity(city);
     if (cityError) {
       newErrors.city = cityError;
       newMissing.city = true;
     }
-    
+
     const passwordError = validatePassword(password);
     if (passwordError) {
       newErrors.password = passwordError;
       newMissing.password = true;
     }
-    
+
     // Profile photo is optional
-    
+
     setErrors(newErrors);
     setMissing(newMissing);
     return Object.keys(newErrors).length === 0;
@@ -133,7 +141,7 @@ const SignupAgent = () => {
     });
     if (!result.canceled && result.assets && result.assets.length > 0) {
       setProfilePhoto(result.assets[0].uri);
-      if (missing.profilePhoto) setMissing(m => ({...m, profilePhoto: false}));
+      if (missing.profilePhoto) setMissing(m => ({ ...m, profilePhoto: false }));
     }
   };
 
@@ -145,78 +153,121 @@ const SignupAgent = () => {
     }
   };
 
-const handleSignup = async () => {
-  if (!validate()) {
-    Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
-    return;
-  }
+  const handleSignup = async () => {
+    if (!validate()) {
+      Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
+      return;
+    }
 
-  try {
+    try {
+      setLoading(true);
+      setFormError('');
+
+      // Step 1: Send OTP FIRST
+      const cleanedPhone = phone.replace(/[\s\-\(\)\.\+]/g, '');
+      const otpRes = await fetch(`${BACKEND_URL}/api/otp/send-phone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      });
+      const otpData = await otpRes.json();
+
+      if (!otpData.success) {
+        setFormError(otpData.error || 'Failed to send OTP. Please check your phone number.');
+        setLoading(false);
+        return;
+      }
+
+      // OTP Sent Successfully
+      setOtpDocId(otpData.docId);
+      setLoading(false);
+      setModalVisible(true);
+
+      // Dev mode alert
+      if (otpData.devOtp) {
+        Alert.alert('Dev OTP', `Your code is: ${otpData.devOtp}`);
+      }
+
+    } catch (err: any) {
+      console.error('Signup Error:', err);
+      setFormError('Network error. Please check your connection.');
+      setLoading(false);
+    }
+  };
+
+  const handleVerifySuccess = async () => {
+    setModalVisible(false);
     setLoading(true);
-    setFormError('');
 
-    // Step 1: Create Firebase Auth user
-    // Generate email from phone if email not provided (Firebase requires email)
-    // Clean phone number (remove spaces, dashes, parentheses, dots, and + sign) - keep only digits
-    const cleanedPhone = phone.replace(/[\s\-\(\)\.\+]/g, '');
-    const authEmail = email && email.trim().length > 0 
-      ? email.trim() 
-      : `user_${cleanedPhone}@forsa.app`;
-    
-    const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
-    const user = userCredential.user;
+    try {
+      // Step 2: Create Firebase Auth user (Only after OTP verification)
+      const cleanedPhone = phone.replace(/[\s\-\(\)\.\+]/g, '');
+      const authEmail = email && email.trim().length > 0
+        ? email.trim()
+        : `user_${cleanedPhone}@forsa.app`;
 
-    // Step 2: Upload profile photo to AWS S3
-    let profilePhotoUrl = '';
-    if (profilePhoto) {
-      profilePhotoUrl = await uploadImageToS3(
-        profilePhoto,
-        `users/${user.uid}/profile.jpg`
-      );
+      const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
+      const user = userCredential.user;
+
+      // Step 3: Upload profile photo to AWS S3
+      let profilePhotoUrl = '';
+      if (profilePhoto) {
+        profilePhotoUrl = await uploadImageToS3(
+          profilePhoto,
+          `users/${user.uid}/profile.jpg`
+        );
+      }
+
+      // Step 4: Save user data to Firestore
+      const userData = {
+        uid: user.uid,
+        role: 'agent',
+        email: email && email.trim().length > 0 ? email.trim() : null,
+        phone: phone,
+        firstName: firstName,
+        lastName: lastName,
+        agency: agency,
+        license: license,
+        city: city,
+        profilePhoto: profilePhotoUrl,
+        phoneVerified: true, // Verified now
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Save to users collection
+      await setDoc(doc(db, 'users', user.uid), userData);
+
+      // Also save to role-specific collection
+      await setDoc(doc(db, 'agents', user.uid), userData);
+
+      // Navigate to Feed (assuming generic feed for now, or specific agent feed if exists)
+      // Agent doesn't have a specific feed in current known routes, defaulting to player-feed or home
+      // Re-checking routes... defaulting to index for now or agent-feed if I find it later
+      // The user has 'edit-profile-agent' but feeds seem role specific.
+      // Let's go to /agent-feed if it exists or / for now.
+      // Based on file names, there isn't an explicit "agent-feed.tsx". 
+      // I will route to '/' and let the auth state listener redirect, or just '/'
+      router.replace('/agent-feed'); // Assuming this exists or will exist
+
+    } catch (err: any) {
+      let errorMsg = i18n.t('signupFailedMessage');
+      if (err.code === 'auth/email-already-in-use') {
+        errorMsg = i18n.t('emailAlreadyRegistered');
+      } else if (err.code === 'auth/invalid-email') {
+        errorMsg = i18n.t('invalidEmailAddress');
+      } else if (err.code === 'auth/weak-password') {
+        errorMsg = i18n.t('weakPassword');
+      } else if (err.message) {
+        errorMsg = err.message;
+      }
+      console.error('Signup Error:', err);
+      setFormError(errorMsg);
+      Alert.alert(i18n.t('signupFailed'), errorMsg);
+    } finally {
+      setLoading(false);
     }
-
-    // Step 3: Save user data to Firestore
-    const userData = {
-      uid: user.uid,
-      role: 'agent',
-      email: email && email.trim().length > 0 ? email.trim() : null,
-      phone: phone,
-      firstName: firstName,
-      lastName: lastName,
-      agency: agency,
-      license: license,
-      city: city,
-      profilePhoto: profilePhotoUrl,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    // Save to users collection
-    await setDoc(doc(db, 'users', user.uid), userData);
-
-    // Also save to role-specific collection
-    await setDoc(doc(db, 'agents', user.uid), userData);
-
-    // ✅ Navigate
-    router.replace('/agent-feed');
-  } catch (err: any) {
-    let errorMsg = i18n.t('signupFailedMessage');
-    if (err.code === 'auth/email-already-in-use') {
-      errorMsg = i18n.t('emailAlreadyRegistered');
-    } else if (err.code === 'auth/invalid-email') {
-      errorMsg = i18n.t('invalidEmailAddress');
-    } else if (err.code === 'auth/weak-password') {
-      errorMsg = i18n.t('weakPassword');
-    } else if (err.message) {
-      errorMsg = err.message;
-    }
-    console.error('Signup Error:', err);
-    setFormError(errorMsg);
-    Alert.alert(i18n.t('signupFailed'), errorMsg);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -231,13 +282,13 @@ const handleSignup = async () => {
               <Ionicons name="arrow-back" size={24} color="#fff" />
             </TouchableOpacity>
             <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>{i18n.t('signup_agent')}</Text>
-            <Text style={styles.headerSubtitle}>{i18n.t('createYourAgentAccount') || 'Create your agent account'}</Text>
+              <Text style={styles.headerTitle}>{i18n.t('signup_agent')}</Text>
+              <Text style={styles.headerSubtitle}>{i18n.t('createYourAgentAccount') || 'Create your agent account'}</Text>
             </View>
           </View>
 
-          <ScrollView 
-            contentContainerStyle={styles.scrollContent} 
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
@@ -245,13 +296,13 @@ const handleSignup = async () => {
               <View style={styles.errorContainer}>
                 <Ionicons name="alert-circle" size={16} color="#ff3b30" />
                 <Text style={styles.errorSubmitText}>{formError}</Text>
-      </View>
+              </View>
             )}
 
             {/* Profile Picture Picker */}
             <View style={styles.profileSection}>
               <TouchableOpacity onPress={pickImage} style={styles.profileImageContainer}>
-              {profilePhoto ? (
+                {profilePhoto ? (
                   <Image source={{ uri: profilePhoto }} style={styles.profileImage} />
                 ) : (
                   <View style={styles.profileImagePlaceholder}>
@@ -279,7 +330,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={firstName}
-                    onChangeText={t => { setFirstName(t); if (missing.firstName) setMissing(m => ({...m, firstName: false})); }}
+                    onChangeText={t => { setFirstName(t); if (missing.firstName) setMissing(m => ({ ...m, firstName: false })); }}
                     autoCapitalize="words"
                     placeholder={i18n.t('first_name_ph')}
                     placeholderTextColor="#999"
@@ -298,7 +349,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={lastName}
-                    onChangeText={t => { setLastName(t); if (missing.lastName) setMissing(m => ({...m, lastName: false})); }}
+                    onChangeText={t => { setLastName(t); if (missing.lastName) setMissing(m => ({ ...m, lastName: false })); }}
                     autoCapitalize="words"
                     placeholder={i18n.t('last_name_ph')}
                     placeholderTextColor="#999"
@@ -317,7 +368,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={phone}
-                    onChangeText={t => { setPhone(t); if (missing.phone) setMissing(m => ({...m, phone: false})); }}
+                    onChangeText={t => { setPhone(t); if (missing.phone) setMissing(m => ({ ...m, phone: false })); }}
                     keyboardType="phone-pad"
                     placeholder={i18n.t('phone_ph')}
                     placeholderTextColor="#999"
@@ -335,9 +386,9 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={email}
-                    onChangeText={t => { 
-                      setEmail(t); 
-                      if (missing.email) setMissing(m => ({...m, email: false})); 
+                    onChangeText={t => {
+                      setEmail(t);
+                      if (missing.email) setMissing(m => ({ ...m, email: false }));
                       // Clear error if field is empty (since it's optional)
                       if (!t || t.trim().length === 0) {
                         setErrors(prev => {
@@ -423,7 +474,7 @@ const handleSignup = async () => {
                             style={[styles.cityOption, city === option.key && styles.cityOptionSelected]}
                             onPress={() => {
                               setCity(option.key);
-                              if (missing.city) setMissing(m => ({...m, city: false}));
+                              if (missing.city) setMissing(m => ({ ...m, city: false }));
                               setShowCityModal(false);
                             }}
                           >
@@ -432,12 +483,12 @@ const handleSignup = async () => {
                             </Text>
                             {city === option.key && <Ionicons name="checkmark" size={20} color="#fff" />}
                           </TouchableOpacity>
-                  ))}
+                        ))}
                       </ScrollView>
-              </View>
+                    </View>
                   </TouchableOpacity>
                 </Modal>
-            </View>
+              </View>
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>
@@ -446,10 +497,10 @@ const handleSignup = async () => {
                 </Text>
                 <View style={[styles.inputWrapper, missing.password && styles.inputWrapperError]}>
                   <Ionicons name="lock-closed-outline" size={20} color="#999" style={styles.inputIcon} />
-            <TextInput
+                  <TextInput
                     style={styles.input}
                     value={password}
-                    onChangeText={t => { setPassword(t); if (missing.password) setMissing(m => ({...m, password: false})); }}
+                    onChangeText={t => { setPassword(t); if (missing.password) setMissing(m => ({ ...m, password: false })); }}
                     secureTextEntry
                     placeholder={i18n.t('password_ph')}
                     placeholderTextColor="#999"
@@ -469,11 +520,20 @@ const handleSignup = async () => {
                 ) : (
                   <Text style={styles.signupButtonText}>{i18n.t('signup')}</Text>
                 )}
-            </TouchableOpacity>
-          </View>
-      </ScrollView>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
         </Animated.View>
       </LinearGradient>
+
+      {/* OTP Modal */}
+      <OTPModal
+        visible={modalVisible}
+        phone={phone}
+        docId={otpDocId}
+        onClose={() => { setModalVisible(false); setLoading(false); }}
+        onVerifySuccess={handleVerifySuccess}
+      />
     </KeyboardAvoidingView>
   );
 };
