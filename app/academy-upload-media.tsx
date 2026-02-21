@@ -2,17 +2,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useRef, useState } from 'react';
-import { Alert, Animated, Easing, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
+import { uploadAndSaveMedia, ResourceType } from '../services/MediaService';
 
 export default function AcademyUploadMediaScreen() {
+  const router = useRouter();
   const { openMenu } = useHamburgerMenu();
   const [media, setMedia] = useState<Array<{ uri: string; type: 'image' | 'video'; caption?: string }>>([]);
   const [captionDraft, setCaptionDraft] = useState('');
   const [showCaptionInput, setShowCaptionInput] = useState(false);
   const [pendingMedia, setPendingMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ [key: number]: boolean }>({});
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
@@ -26,7 +31,7 @@ export default function AcademyUploadMediaScreen() {
 
   const handleAddMedia = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      mediaTypes: ['images', 'videos'],
       allowsEditing: true,
       quality: 0.8,
     });
@@ -57,9 +62,63 @@ export default function AcademyUploadMediaScreen() {
       Alert.alert(i18n.t('error') || 'Error', i18n.t('pleaseAddMedia') || 'Please add at least one media item');
       return;
     }
-    // TODO: Implement upload to Firebase/backend
-    Alert.alert(i18n.t('success') || 'Success', i18n.t('mediaUploaded') || 'Media uploaded successfully!');
-    setMedia([]);
+
+    setUploading(true);
+    const uploadResults: Array<{ success: boolean; error?: string }> = [];
+
+    try {
+      // Upload each media item sequentially
+      for (let i = 0; i < media.length; i++) {
+        const item = media[i];
+        setUploadProgress((prev) => ({ ...prev, [i]: true }));
+
+        try {
+          await uploadAndSaveMedia(item.uri, item.type as ResourceType, 'public');
+          uploadResults.push({ success: true });
+        } catch (error: any) {
+          console.error(`Upload failed for item ${i}:`, error);
+          uploadResults.push({ 
+            success: false, 
+            error: error.message || 'Upload failed' 
+          });
+        } finally {
+          setUploadProgress((prev) => ({ ...prev, [i]: false }));
+        }
+      }
+
+      const successCount = uploadResults.filter(r => r.success).length;
+      const failCount = uploadResults.filter(r => !r.success).length;
+
+      if (successCount > 0) {
+        Alert.alert(
+          i18n.t('success') || 'Success',
+          `${successCount} media item(s) uploaded successfully${failCount > 0 ? `, ${failCount} failed` : ''}`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                setMedia([]);
+                router.back();
+              },
+            },
+          ]
+        );
+      } else {
+        Alert.alert(
+          i18n.t('error') || 'Error',
+          'All uploads failed. Please try again.'
+        );
+      }
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      Alert.alert(
+        i18n.t('error') || 'Error',
+        error.message || 'Failed to upload media. Please try again.'
+      );
+    } finally {
+      setUploading(false);
+      setUploadProgress({});
+    }
   };
 
   const handleRemoveMedia = (index: number) => {
@@ -177,6 +236,24 @@ export default function AcademyUploadMediaScreen() {
                   </TouchableOpacity>
                 </View>
               </View>
+            )}
+
+            {media.length > 0 && (
+              <TouchableOpacity 
+                style={[styles.submitBtn, uploading && styles.submitBtnDisabled]} 
+                onPress={handleSubmit} 
+                activeOpacity={0.8}
+                disabled={uploading}
+              >
+                {uploading ? (
+                  <View style={styles.uploadingContainer}>
+                    <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+                    <Text style={styles.submitBtnText}>{i18n.t('uploading') || 'Uploading...'}</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.submitBtnText}>{i18n.t('submit') || 'Submit'}</Text>
+                )}
+              </TouchableOpacity>
             )}
           </ScrollView>
         </Animated.View>
@@ -418,5 +495,13 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  submitBtnDisabled: {
+    opacity: 0.6,
+  },
+  uploadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

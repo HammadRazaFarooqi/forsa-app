@@ -6,22 +6,65 @@ import fs from 'fs';
 // Firebase Admin initialization
 if (!admin.apps.length) {
   try {
-    // File path to your service account JSON
-    const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
+    let serviceAccount: any = null;
+    let initialized = false;
 
-    if (!fs.existsSync(serviceAccountPath)) {
-      throw new Error('Firebase service account JSON not found at ' + serviceAccountPath);
+    // Option 1: Try environment variable first (FIREBASE_SERVICE_ACCOUNT_KEY as JSON string)
+    if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+      try {
+        serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+      } catch (parseError) {
+        console.error('Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY from environment:', parseError);
+        throw new Error('Invalid FIREBASE_SERVICE_ACCOUNT_KEY format. Must be valid JSON.');
+      }
+    }
+    // Option 2: Try service account file in multiple locations
+    else {
+      // Check multiple possible locations for the service account file
+      const possiblePaths = [
+        path.join(__dirname, 'serviceAccountKey.json'), // src/config/serviceAccountKey.json (when running from source)
+        path.join(process.cwd(), 'serviceAccountKey.json'), // backend/serviceAccountKey.json
+        path.join(process.cwd(), 'src', 'config', 'serviceAccountKey.json'), // backend/src/config/serviceAccountKey.json
+      ];
+
+      let serviceAccountPath: string | null = null;
+      for (const filePath of possiblePaths) {
+        if (fs.existsSync(filePath)) {
+          serviceAccountPath = filePath;
+          break;
+        }
+      }
+
+      if (serviceAccountPath) {
+        serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+      } else {
+        // Option 3: Try Application Default Credentials (for GCP environments)
+        try {
+          admin.initializeApp({
+            credential: admin.credential.applicationDefault(),
+          });
+          initialized = true;
+          console.log('✅ Firebase Admin initialized with Application Default Credentials');
+        } catch (adcError) {
+          throw new Error(
+            'Firebase service account not found. Please provide one of the following:\n' +
+            '1. Set FIREBASE_SERVICE_ACCOUNT_KEY environment variable (JSON string)\n' +
+            '2. Place serviceAccountKey.json in one of these locations:\n' +
+            '   - ' + path.join(process.cwd(), 'serviceAccountKey.json') + '\n' +
+            '   - ' + path.join(process.cwd(), 'src', 'config', 'serviceAccountKey.json') + '\n' +
+            '3. Configure Application Default Credentials (for GCP environments)'
+          );
+        }
+      }
     }
 
-    // Read the JSON file
-    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
-
-    // Initialize Firebase Admin
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-    });
-
-    console.log('✅ Firebase Admin initialized with service account');
+    // Initialize with service account if we have one and haven't initialized yet
+    if (serviceAccount && !initialized) {
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+      console.log('✅ Firebase Admin initialized with service account');
+    }
   } catch (error) {
     console.error('Firebase Admin initialization error:', error);
     throw error;

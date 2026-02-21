@@ -141,12 +141,20 @@ service cloud.firestore {
     
     // Media
     match /media/{mediaId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      // Allow reading public/unlisted media to authenticated users
+      allow read: if isAuthenticated() && 
+                     (resource.data.visibility == 'public' || 
+                      resource.data.visibility == 'unlisted' ||
+                      resource.data.ownerId == request.auth.uid);
+      // Allow creating media with ownerId matching auth uid
+      allow create: if isAuthenticated() && 
+                       request.resource.data.ownerId == request.auth.uid;
+      // Allow updating only by owner (limited fields)
       allow update: if isAuthenticated() && 
-                       resource.data.userId == request.auth.uid;
+                       resource.data.ownerId == request.auth.uid;
+      // Allow deleting only by owner
       allow delete: if isAuthenticated() && 
-                       resource.data.userId == request.auth.uid;
+                       resource.data.ownerId == request.auth.uid;
     }
     
     // Settings (Admin settings like commission rate)

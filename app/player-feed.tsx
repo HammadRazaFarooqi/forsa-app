@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, getFirestore, orderBy, query } from 'firebase/firestore';
+import { collection, onSnapshot, getFirestore, orderBy, query, where } from 'firebase/firestore';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useRef } from 'react';
-import { ActivityIndicator, Animated, Easing, FlatList, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
@@ -25,35 +26,87 @@ export default function PlayerFeedScreen() {
   }, []);
 
   React.useEffect(() => {
-    const fetchFeed = async () => {
-      setLoading(true);
-      try {
-        const db = getFirestore();
-        const postsRef = collection(db, 'posts');
-        const q = query(postsRef, orderBy('timestamp', 'desc'));
-        const querySnapshot = await getDocs(q);
-        const posts = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    setLoading(true);
+    const db = getFirestore();
+    const postsRef = collection(db, 'posts');
+    
+    // Query posts ordered by timestamp (new media posts will have this field)
+    const q = query(
+      postsRef, 
+      orderBy('timestamp', 'desc')
+    );
+
+    // Set up real-time listener
+    const unsubscribe = onSnapshot(
+      q,
+      (querySnapshot) => {
+        const posts = querySnapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          ...doc.data() 
+        }));
         setFeed(posts);
-      } catch (e) {
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Feed listener error:', error);
         setFeed([]);
+        setLoading(false);
       }
-      setLoading(false);
-    };
-    fetchFeed();
+    );
+
+    // Cleanup listener on unmount
+    return () => unsubscribe();
   }, []);
 
-  const renderFeedItem = ({ item }: any) => (
-    <View style={styles.feedItem}>
-      <View style={styles.feedHeader}>
-        <View style={styles.feedAuthorContainer}>
-          <Ionicons name="person-circle-outline" size={24} color="#000" />
-          <Text style={styles.feedAuthor}>{item.author || 'Anonymous'}</Text>
+  const renderFeedItem = (item: any) => {
+    const timestamp = item.timestamp?.seconds 
+      ? new Date(item.timestamp.seconds * 1000) 
+      : item.createdAt?.seconds 
+        ? new Date(item.createdAt.seconds * 1000)
+        : null;
+
+    return (
+      <View key={item.id} style={styles.feedItem}>
+        <View style={styles.feedHeader}>
+          <View style={styles.feedAuthorContainer}>
+            <Ionicons name="person-circle-outline" size={24} color="#000" />
+            <Text style={styles.feedAuthor}>{item.author || 'Anonymous'}</Text>
+          </View>
+          {timestamp && (
+            <Text style={styles.feedTime}>
+              {timestamp.toLocaleDateString()}
+            </Text>
+          )}
         </View>
-        <Text style={styles.feedTime}>{item.timestamp ? new Date(item.timestamp.seconds * 1000).toLocaleDateString() : ''}</Text>
+        
+        {/* Media display */}
+        {item.mediaUrl && (
+          <View style={styles.mediaContainer}>
+            {item.mediaType === 'video' ? (
+              <Video
+                source={{ uri: item.mediaUrl }}
+                style={styles.mediaVideo}
+                useNativeControls
+                resizeMode={ResizeMode.CONTAIN}
+                isLooping={false}
+              />
+            ) : (
+              <Image 
+                source={{ uri: item.mediaUrl }} 
+                style={styles.mediaImage}
+                resizeMode="cover"
+              />
+            )}
+          </View>
+        )}
+        
+        {/* Content text */}
+        {item.content && (
+          <Text style={styles.feedContent}>{item.content}</Text>
+        )}
       </View>
-      <Text style={styles.feedContent}>{item.content}</Text>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -91,22 +144,7 @@ export default function PlayerFeedScreen() {
                 <Text style={styles.emptySubtext}>{i18n.t('beFirstToPost') || 'Be the first to share something!'}</Text>
               </View>
             ) : (
-              feed.map((item) => (
-                <View key={item.id} style={styles.feedItem}>
-                  <View style={styles.feedHeader}>
-                    <View style={styles.feedAuthorContainer}>
-                      <Ionicons name="person-circle-outline" size={24} color="#000" />
-                      <Text style={styles.feedAuthor}>{item.author || 'Anonymous'}</Text>
-                    </View>
-                    {item.timestamp && (
-                      <Text style={styles.feedTime}>
-                        {new Date(item.timestamp.seconds * 1000).toLocaleDateString()}
-                      </Text>
-                    )}
-                  </View>
-                  <Text style={styles.feedContent}>{item.content}</Text>
-                </View>
-              ))
+              feed.map((item) => renderFeedItem(item))
             )}
           </ScrollView>
         </Animated.View>
@@ -222,5 +260,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#222',
     lineHeight: 24,
+    marginTop: 12,
+  },
+  mediaContainer: {
+    width: '100%',
+    marginVertical: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  mediaImage: {
+    width: '100%',
+    height: 300,
+    backgroundColor: '#000',
+  },
+  mediaVideo: {
+    width: '100%',
+    height: 300,
+    backgroundColor: '#000',
   },
 });

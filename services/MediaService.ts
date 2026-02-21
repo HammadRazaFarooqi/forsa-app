@@ -1,0 +1,375 @@
+import Constants from 'expo-constants';
+import { auth, db } from '../lib/firebase';
+import { collection, addDoc, serverTimestamp, doc, setDoc, query, where, orderBy, onSnapshot, Unsubscribe } from 'firebase/firestore';
+
+// Helper function to get environment variables with multiple fallbacks
+function getEnvVar(key: string, fallbackKey?: string): string | undefined {
+  // Try process.env first (works in Expo with EXPO_PUBLIC_ prefix)
+  let value = process.env[key];
+  if (value && value.trim()) return value.trim();
+  
+  // Try fallback key if provided
+  if (fallbackKey) {
+    value = process.env[fallbackKey];
+    if (value && value.trim()) return value.trim();
+  }
+  
+  // Try non-EXPO_PUBLIC_ version as fallback (for backwards compatibility)
+  const nonExpoKey = key.replace('EXPO_PUBLIC_', '');
+  value = process.env[nonExpoKey];
+  if (value && value.trim()) return value.trim();
+  
+  // Try Constants.expoConfig.extra (for app.json configuration)
+  const extraValue = Constants.expoConfig?.extra?.[key.replace('EXPO_PUBLIC_', '').toLowerCase()] ||
+                    Constants.expoConfig?.extra?.[nonExpoKey.toLowerCase()] ||
+                    (fallbackKey ? Constants.expoConfig?.extra?.[fallbackKey.replace('EXPO_PUBLIC_', '').toLowerCase()] : undefined);
+  if (extraValue) return String(extraValue).trim();
+  
+  // Try Constants.manifest.extra (legacy - with type guard)
+  const manifest = Constants.manifest as any;
+  if (manifest?.extra) {
+    const manifestValue = manifest.extra[key.replace('EXPO_PUBLIC_', '').toLowerCase()] ||
+                          manifest.extra[nonExpoKey.toLowerCase()] ||
+                          (fallbackKey ? manifest.extra[fallbackKey.replace('EXPO_PUBLIC_', '').toLowerCase()] : undefined);
+    if (manifestValue) return String(manifestValue).trim();
+  }
+  
+  return undefined;
+}
+
+// Types
+export type ResourceType = 'image' | 'video';
+export type Visibility = 'public' | 'private' | 'unlisted';
+
+export interface CloudinaryResponse {
+  public_id: string;
+  asset_id?: string;
+  secure_url: string;
+  format?: string;
+  bytes?: number;
+  duration?: number;
+  width?: number;
+  height?: number;
+  resource_type: string;
+  [key: string]: any;
+}
+
+export interface MediaDoc {
+  id: string;
+  ownerId: string;
+  resourceType: ResourceType;
+  visibility: Visibility;
+  cloudinaryPublicId: string;
+  cloudinaryAssetId: string | null;
+  secureUrl: string;
+  playbackUrl: string;
+  format: string | null;
+  sizeBytes: number | null;
+  durationSec: number | null;
+  width: number | null;
+  height: number | null;
+  createdAt: any;
+  updatedAt: any;
+  status: 'ready' | 'failed';
+  error: string | null;
+}
+
+/**
+ * Upload media file directly to Cloudinary using unsigned upload preset
+ * @param localUri - Local file URI from expo-image-picker
+ * @param type - 'image' or 'video'
+ * @returns Cloudinary response with metadata
+ */
+export async function uploadMedia(
+  localUri: string,
+  type: ResourceType
+): Promise<CloudinaryResponse> {
+  // Get environment variables with multiple fallbacks
+  const cloudName = getEnvVar('EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_CLOUD_NAME');
+  const uploadPreset = getEnvVar('EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET');
+  const folder = getEnvVar('EXPO_PUBLIC_CLOUDINARY_FOLDER', 'CLOUDINARY_UPLOAD_FOLDER') || 'forsa/media';
+
+  // Debug logging (remove in production)
+  console.log('[MediaService] Environment variables:', {
+    cloudName: cloudName ? `${cloudName.substring(0, 4)}...` : 'NOT FOUND',
+    uploadPreset: uploadPreset ? `${uploadPreset.substring(0, 4)}...` : 'NOT FOUND',
+    folder,
+    'process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME': process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME,
+    'process.env.CLOUDINARY_CLOUD_NAME': process.env.CLOUDINARY_CLOUD_NAME,
+  });
+
+  // Check if credentials are missing or empty
+  if (!cloudName || !cloudName.trim() || !uploadPreset || !uploadPreset.trim()) {
+    console.error('Cloudinary credentials not found or empty. Checked:', {
+      'process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME': process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME,
+      'process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET': process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET,
+      'getEnvVar result - cloudName': cloudName,
+      'getEnvVar result - uploadPreset': uploadPreset,
+      'Constants.expoConfig?.extra': Constants.expoConfig?.extra,
+    });
+    
+    throw new Error(
+      'Cloudinary credentials missing or empty.\n\n' +
+      'Please add to your .env file in the project root:\n' +
+      'EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME=your_actual_cloud_name\n' +
+      'EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET=your_actual_upload_preset\n' +
+      'EXPO_PUBLIC_CLOUDINARY_FOLDER=forsa/media (optional)\n\n' +
+      'Then restart your Expo development server with: npm start -- --clear'
+    );
+  }
+
+  // Trim whitespace
+  const trimmedCloudName = cloudName.trim();
+  const trimmedUploadPreset = uploadPreset.trim();
+
+  // Check if placeholder values are still being used
+  if (
+    trimmedCloudName.includes('your_cloud_name') ||
+    trimmedCloudName.includes('your_actual') ||
+    trimmedCloudName.includes('placeholder') ||
+    trimmedUploadPreset.includes('your_upload_preset') ||
+    trimmedUploadPreset.includes('your_actual') ||
+    trimmedUploadPreset.includes('placeholder')
+  ) {
+    throw new Error(
+      'Cloudinary credentials are still using placeholder values.\n\n' +
+      'Please replace the placeholder values in your .env file with your actual Cloudinary credentials:\n' +
+      `Current cloudName: "${trimmedCloudName}"\n` +
+      `Current uploadPreset: "${trimmedUploadPreset}"\n\n` +
+      'Steps to fix:\n' +
+      '1. Get your Cloudinary cloud name from https://console.cloudinary.com/\n' +
+      '2. Create an unsigned upload preset in Cloudinary Settings > Upload\n' +
+      '3. Update your .env file with the real values\n' +
+      '4. Restart Expo server with: npm start -- --clear'
+    );
+  }
+
+  // Choose endpoint based on resource type (use trimmed values)
+  const endpoint = type === 'video' 
+    ? `https://api.cloudinary.com/v1_1/${trimmedCloudName}/video/upload`
+    : `https://api.cloudinary.com/v1_1/${trimmedCloudName}/image/upload`;
+
+  // Create FormData
+  const formData = new FormData();
+  
+  // Get file name from URI
+  const filename = localUri.split('/').pop() || `media.${type === 'video' ? 'mp4' : 'jpg'}`;
+  const match = /\.(\w+)$/.exec(filename);
+  const type_extension = match ? `image/${match[1] === 'jpg' ? 'jpeg' : match[1]}` : 
+    (type === 'video' ? 'video/mp4' : 'image/jpeg');
+
+  // Append file - React Native FormData expects { uri, type, name }
+  formData.append('file', {
+    uri: localUri,
+    type: type_extension,
+    name: filename,
+  } as any);
+
+  formData.append('upload_preset', trimmedUploadPreset);
+  formData.append('folder', folder);
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      body: formData,
+      // Don't set Content-Type header - React Native FormData sets it automatically with boundary
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = `Cloudinary upload failed: ${response.status} - ${errorText}`;
+      
+      // Provide helpful error messages for common issues
+      if (response.status === 401) {
+        errorMessage += '\n\nThis usually means:\n' +
+          '1. Your upload preset name is incorrect, OR\n' +
+          '2. Your upload preset is not set to "Unsigned" mode, OR\n' +
+          '3. Your cloud name is incorrect\n\n' +
+          'Please verify your Cloudinary credentials in the .env file and ensure:\n' +
+          '- The upload preset exists and is set to "Unsigned"\n' +
+          '- The cloud name matches your Cloudinary account\n' +
+          '- You have restarted the Expo server after updating .env';
+      }
+      
+      throw new Error(errorMessage);
+    }
+
+    const data: CloudinaryResponse = await response.json();
+    
+    if (data.error) {
+      throw new Error(`Cloudinary error: ${data.error.message || 'Unknown error'}`);
+    }
+
+    return data;
+  } catch (error: any) {
+    console.error('Upload error:', error);
+    throw new Error(
+      error.message || 'Failed to upload media to Cloudinary. Please check your connection and try again.'
+    );
+  }
+}
+
+/**
+ * Save media metadata to Firestore /media collection
+ * @param cloudinaryResponse - Response from Cloudinary upload
+ * @param type - 'image' or 'video'
+ * @param visibility - Visibility setting (default: 'public')
+ * @returns Media document ID
+ */
+export async function saveMediaToFirestore(
+  cloudinaryResponse: CloudinaryResponse,
+  type: ResourceType,
+  visibility: Visibility = 'public'
+): Promise<string> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('User must be authenticated to save media');
+  }
+
+  const mediaData: Omit<MediaDoc, 'id'> = {
+    ownerId: user.uid,
+    resourceType: type,
+    visibility,
+    cloudinaryPublicId: cloudinaryResponse.public_id,
+    cloudinaryAssetId: cloudinaryResponse.asset_id || null,
+    secureUrl: cloudinaryResponse.secure_url,
+    playbackUrl: cloudinaryResponse.secure_url, // For now, same as secureUrl; can add transformations later
+    format: cloudinaryResponse.format || null,
+    sizeBytes: cloudinaryResponse.bytes || null,
+    durationSec: type === 'video' && cloudinaryResponse.duration ? cloudinaryResponse.duration : null,
+    width: cloudinaryResponse.width || null,
+    height: cloudinaryResponse.height || null,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    status: 'ready',
+    error: null,
+  };
+
+  try {
+    const docRef = await addDoc(collection(db, 'media'), mediaData);
+    return docRef.id;
+  } catch (error: any) {
+    console.error('Error saving media to Firestore:', error);
+    throw new Error(`Failed to save media metadata: ${error.message}`);
+  }
+}
+
+/**
+ * Create a feed item in /posts collection if feed uses posts
+ * This links the media to the existing feed structure
+ * @param mediaDoc - The media document data
+ * @returns Post document ID if created, null otherwise
+ */
+export async function createFeedItemIfNeeded(
+  mediaDoc: MediaDoc
+): Promise<string | null> {
+  // Since feed reads from /posts, we'll create a post entry
+  // that references the media
+  try {
+    const postData = {
+      mediaId: mediaDoc.id,
+      mediaUrl: mediaDoc.secureUrl,
+      mediaType: mediaDoc.resourceType,
+      ownerId: mediaDoc.ownerId,
+      author: 'User', // Can be enhanced to fetch user name
+      content: '', // Optional caption can be added later
+      timestamp: serverTimestamp(),
+      createdAt: serverTimestamp(),
+    };
+
+    const postRef = await addDoc(collection(db, 'posts'), postData);
+    return postRef.id;
+  } catch (error: any) {
+    console.error('Error creating feed item:', error);
+    // Don't throw - feed might work without this
+    return null;
+  }
+}
+
+/**
+ * Subscribe to user's media uploads
+ * @param uid - User ID
+ * @param callback - Callback function that receives media documents array
+ * @returns Unsubscribe function
+ */
+export function subscribeMyMedia(
+  uid: string,
+  callback: (media: MediaDoc[]) => void
+): Unsubscribe {
+  const mediaRef = collection(db, 'media');
+  const q = query(
+    mediaRef,
+    where('ownerId', '==', uid),
+    orderBy('createdAt', 'desc')
+  );
+
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const media: MediaDoc[] = [];
+      snapshot.forEach((doc) => {
+        media.push({
+          id: doc.id,
+          ...doc.data(),
+        } as MediaDoc);
+      });
+      callback(media);
+    },
+    (error) => {
+      console.error('Error subscribing to media:', error);
+      callback([]);
+    }
+  );
+}
+
+/**
+ * Complete upload flow: upload to Cloudinary -> save to Firestore -> create feed item
+ * @param localUri - Local file URI
+ * @param type - 'image' or 'video'
+ * @param visibility - Visibility setting (default: 'public')
+ * @returns Object with mediaId and postId (if created)
+ */
+export async function uploadAndSaveMedia(
+  localUri: string,
+  type: ResourceType,
+  visibility: Visibility = 'public'
+): Promise<{ mediaId: string; postId: string | null }> {
+  try {
+    // Step 1: Upload to Cloudinary
+    const cloudinaryResponse = await uploadMedia(localUri, type);
+
+    // Step 2: Save to Firestore
+    const mediaId = await saveMediaToFirestore(cloudinaryResponse, type, visibility);
+
+    // Step 3: Get the media doc to create feed item
+    // We'll construct the media doc from what we saved
+    const mediaDoc: MediaDoc = {
+      id: mediaId,
+      ownerId: auth.currentUser!.uid,
+      resourceType: type,
+      visibility,
+      cloudinaryPublicId: cloudinaryResponse.public_id,
+      cloudinaryAssetId: cloudinaryResponse.asset_id || null,
+      secureUrl: cloudinaryResponse.secure_url,
+      playbackUrl: cloudinaryResponse.secure_url,
+      format: cloudinaryResponse.format || null,
+      sizeBytes: cloudinaryResponse.bytes || null,
+      durationSec: type === 'video' && cloudinaryResponse.duration ? cloudinaryResponse.duration : null,
+      width: cloudinaryResponse.width || null,
+      height: cloudinaryResponse.height || null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      status: 'ready',
+      error: null,
+    };
+
+    // Step 4: Create feed item if needed
+    const postId = await createFeedItemIfNeeded(mediaDoc);
+
+    return { mediaId, postId };
+  } catch (error: any) {
+    console.error('Complete upload flow error:', error);
+    throw error;
+  }
+}
+
