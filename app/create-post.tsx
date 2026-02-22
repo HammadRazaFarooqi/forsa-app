@@ -20,6 +20,15 @@ export default function CreatePostScreen({ route }: CreatePostScreenProps) {
     }
     setLoading(true);
     try {
+      // Check if user is suspended
+      const { isUserSuspended } = await import('../services/ModerationService');
+      const suspended = await isUserSuspended();
+      if (suspended) {
+        Alert.alert('Account Suspended', 'Your account has been suspended. You cannot create new posts.');
+        setLoading(false);
+        return;
+      }
+
       const db = getFirestore();
       const collectionName = feedType === 'agent' ? 'agentPosts' : feedType === 'academy' ? 'academyPosts' : 'posts';
       await addDoc(collection(db, collectionName), {
@@ -29,8 +38,12 @@ export default function CreatePostScreen({ route }: CreatePostScreenProps) {
       });
       setContent('');
       Alert.alert(i18n.t('success'), i18n.t('postCreated'));
-    } catch (e) {
-      Alert.alert(i18n.t('error'), i18n.t('submissionError'));
+    } catch (e: any) {
+      if (e.message && e.message.includes('suspended')) {
+        Alert.alert('Account Suspended', e.message);
+      } else {
+        Alert.alert(i18n.t('error'), i18n.t('submissionError'));
+      }
     }
     setLoading(false);
   };

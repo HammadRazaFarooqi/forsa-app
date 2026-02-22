@@ -269,6 +269,13 @@ export async function createFeedItemIfNeeded(
   // Since feed reads from /posts, we'll create a post entry
   // that references the media
   try {
+    // Check if user is suspended
+    const { isUserSuspended } = await import('./ModerationService');
+    const suspended = await isUserSuspended();
+    if (suspended) {
+      throw new Error('Your account has been suspended. You cannot create new posts.');
+    }
+
     // Get the current user's role
     const ownerRole = await getCurrentUserRole();
     const visibleToRoles = getVisibleToRoles(ownerRole);
@@ -293,7 +300,11 @@ export async function createFeedItemIfNeeded(
     return postRef.id;
   } catch (error: any) {
     console.error('Error creating feed item:', error);
-    // Don't throw - feed might work without this
+    // Re-throw suspension errors
+    if (error.message && error.message.includes('suspended')) {
+      throw error;
+    }
+    // Don't throw other errors - feed might work without this
     return null;
   }
 }

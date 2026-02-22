@@ -33,7 +33,8 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isOwner(userId);
+      // Update: Owner can update their own profile, admin can update any user (for moderation)
+      allow update: if isOwner(userId) || isAdmin();
       allow delete: if false; // Users cannot be deleted
     }
     
@@ -151,19 +152,28 @@ service cloud.firestore {
         (resource.data.status == 'active' || !resource.data.status)
       );
       
-      // Create: Must be authenticated, ownerId must match auth uid, and ownerRole/visibleToRoles must be valid
+      // Create: Must be authenticated, ownerId must match auth uid, ownerRole/visibleToRoles must be valid, and user must not be suspended
       allow create: if isAuthenticated() && 
                        request.resource.data.ownerId == request.auth.uid &&
                        request.resource.data.ownerRole != null &&
                        request.resource.data.visibleToRoles != null &&
                        request.resource.data.visibleToRoles == getAllowedVisibleToRoles(request.resource.data.ownerRole) &&
-                       (request.resource.data.status == 'active' || request.resource.data.status == null);
+                       (request.resource.data.status == 'active' || request.resource.data.status == null) &&
+                       // Check if user is suspended
+                       get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isSuspended != true;
       
-      // Update: Only owner can update, and cannot change ownerId or ownerRole
-      allow update: if isAuthenticated() && 
-                       resource.data.ownerId == request.auth.uid &&
-                       request.resource.data.ownerId == resource.data.ownerId &&
-                       request.resource.data.ownerRole == resource.data.ownerRole;
+      // Update: Owner can update (but not change ownerId/ownerRole), OR admin can set status to 'deleted'
+      allow update: if isAuthenticated() && (
+                       // Owner can update (but not change ownerId or ownerRole)
+                       (resource.data.ownerId == request.auth.uid &&
+                        request.resource.data.ownerId == resource.data.ownerId &&
+                        request.resource.data.ownerRole == resource.data.ownerRole) ||
+                       // Admin can set status to 'deleted' for moderation
+                       (isAdmin() && 
+                        request.resource.data.status == 'deleted' &&
+                        'deletedAt' in request.resource.data &&
+                        'deletedBy' in request.resource.data)
+                     );
       
       // Delete: Only owner can delete (by setting status to 'deleted')
       allow delete: if isAuthenticated() && 
@@ -188,6 +198,28 @@ service cloud.firestore {
                        resource.data.ownerId == request.auth.uid;
     }
     
+    // Reports collection
+    match /reports/{reportId} {
+      // Create: Authenticated users can create reports (reporterId must match auth uid)
+      allow create: if isAuthenticated() && 
+                       request.resource.data.reporterId == request.auth.uid &&
+                       request.resource.data.targetType in ['post', 'user'] &&
+                       request.resource.data.reason in ['spam', 'harassment', 'nudity', 'violence', 'fake', 'other'] &&
+                       request.resource.data.status == 'open';
+      
+      // Read: Users can read only their own reports, admins can read all
+      allow read: if isAuthenticated() && 
+                     (resource.data.reporterId == request.auth.uid || isAdmin());
+      
+      // Update: Only admin can update status/resolution
+      allow update: if isAdmin() && 
+                       // Ensure status is valid
+                       (request.resource.data.status == null || 
+                        request.resource.data.status in ['open', 'reviewed', 'resolved']);
+      
+      allow delete: if false; // Reports cannot be deleted
+    }
+
     // Settings (Admin settings like commission rate)
     match /settings/{settingId} {
       allow read: if isAuthenticated();

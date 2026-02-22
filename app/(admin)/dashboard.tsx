@@ -221,17 +221,45 @@ export default function AdminDashboard() {
             </View>
 
             <View style={styles.navigation}>
-                <TouchableOpacity style={styles.navBtn} onPress={() => router.push('/(admin)/users')}>
-                    <Ionicons name="people" size={20} color="#fff" />
+                <TouchableOpacity 
+                    style={styles.navBtn} 
+                    onPress={() => router.push('/(admin)/users')}
+                    activeOpacity={0.7}
+                >
+                    <View style={styles.navIconContainer}>
+                        <Ionicons name="people" size={24} color="#fff" />
+                    </View>
                     <Text style={styles.navText}>Users</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.navBtn} onPress={() => router.push('/(admin)/bookings')}>
-                    <Ionicons name="calendar" size={20} color="#fff" />
+                <TouchableOpacity 
+                    style={styles.navBtn} 
+                    onPress={() => router.push('/(admin)/bookings')}
+                    activeOpacity={0.7}
+                >
+                    <View style={styles.navIconContainer}>
+                        <Ionicons name="calendar" size={24} color="#fff" />
+                    </View>
                     <Text style={styles.navText}>Bookings</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.navBtn} onPress={() => router.push('/(admin)/checkins')}>
-                    <Ionicons name="qr-code" size={20} color="#fff" />
+                <TouchableOpacity 
+                    style={styles.navBtn} 
+                    onPress={() => router.push('/(admin)/checkins')}
+                    activeOpacity={0.7}
+                >
+                    <View style={styles.navIconContainer}>
+                        <Ionicons name="qr-code" size={24} color="#fff" />
+                    </View>
                     <Text style={styles.navText}>Check-ins</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                    style={styles.navBtn} 
+                    onPress={() => router.push('/(admin)/reports')}
+                    activeOpacity={0.7}
+                >
+                    <View style={styles.navIconContainer}>
+                        <Ionicons name="flag" size={24} color="#fff" />
+                    </View>
+                    <Text style={styles.navText}>Reports</Text>
                 </TouchableOpacity>
             </View>
         </ScrollView>
@@ -239,40 +267,255 @@ export default function AdminDashboard() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f4f6f9', padding: 16 },
-    center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-    welcome: { fontSize: 24, fontWeight: 'bold', color: '#333' },
-    logoutBtn: { backgroundColor: '#e74a3b', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
-    logoutText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-    section: { marginBottom: 24 },
-    sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#555', marginBottom: 12, textTransform: 'uppercase' },
-    statsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-    card: { backgroundColor: '#fff', borderRadius: 10, padding: 12, marginBottom: 10, width: '48%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', elevation: 2 },
-    cardInfo: { flex: 1 },
-    cardTitle: { fontSize: 10, color: '#888', marginBottom: 2, fontWeight: '600' },
-    cardValue: { fontSize: 16, fontWeight: 'bold', color: '#333' },
-    breakdownCard: { backgroundColor: '#fff', borderRadius: 10, padding: 16, elevation: 2 },
-    breakdownRow: { flexDirection: 'row', justifyContent: 'space-between' },
-    breakdownItem: { flex: 1, alignItems: 'center' },
-    bLabel: { fontSize: 11, color: '#888', marginBottom: 2 },
-    bValue: { fontSize: 18, fontWeight: 'bold', color: '#333' },
-    listCard: { backgroundColor: '#fff', borderRadius: 10, padding: 8, elevation: 2 },
-    listItem: { flexDirection: 'row', justifyContent: 'space-between', padding: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-    itemText: { fontSize: 14, color: '#333' },
-    itemValue: { fontSize: 14, fontWeight: 'bold', color: '#1cc88a' },
-    settingsCard: { backgroundColor: '#fff', borderRadius: 10, padding: 16, elevation: 2 },
-    label: { fontSize: 12, color: '#666', marginBottom: 10 },
-    inputRow: { flexDirection: 'row', gap: 10 },
-    input: { flex: 1, backgroundColor: '#f8f9fc', borderRadius: 8, padding: 12, borderWidth: 1, borderColor: '#ddd' },
-    saveBtn: { backgroundColor: '#4e73df', borderRadius: 8, paddingHorizontal: 15, justifyContent: 'center' },
-    saveBtnText: { color: '#fff', fontWeight: 'bold' },
-    activityCard: { flexDirection: 'row', backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 8, alignItems: 'center', elevation: 1 },
-    activityContent: { marginLeft: 12 },
-    activityTitle: { fontSize: 13, fontWeight: 'bold', color: '#333' },
-    activityMsg: { fontSize: 12, color: '#777' },
-    emptyText: { textAlign: 'center', color: '#999', padding: 20, fontSize: 13 },
-    navigation: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, marginBottom: 40 },
-    navBtn: { backgroundColor: '#2e59d9', width: '31%', padding: 15, borderRadius: 10, alignItems: 'center', flexDirection: 'column', gap: 5 },
-    navText: { color: '#fff', fontWeight: 'bold', fontSize: 11 }
+    container: { 
+        flex: 1, 
+        backgroundColor: '#f4f6f9', 
+        padding: 16 
+    },
+    center: { 
+        flex: 1, 
+        justifyContent: 'center', 
+        alignItems: 'center' 
+    },
+    header: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        marginBottom: 24,
+        paddingTop: 8
+    },
+    welcome: { 
+        fontSize: 28, 
+        fontWeight: 'bold', 
+        color: '#1a1a1a' 
+    },
+    logoutBtn: { 
+        backgroundColor: '#e74a3b', 
+        paddingHorizontal: 16, 
+        paddingVertical: 8, 
+        borderRadius: 8,
+        shadowColor: '#e74a3b',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
+        elevation: 3
+    },
+    logoutText: { 
+        color: '#fff', 
+        fontWeight: '600', 
+        fontSize: 13 
+    },
+    section: { 
+        marginBottom: 28 
+    },
+    sectionTitle: { 
+        fontSize: 18, 
+        fontWeight: '700', 
+        color: '#2c3e50', 
+        marginBottom: 16,
+        letterSpacing: 0.5
+    },
+    statsGrid: { 
+        flexDirection: 'row', 
+        flexWrap: 'wrap', 
+        justifyContent: 'space-between',
+    },
+    card: { 
+        backgroundColor: '#fff', 
+        borderRadius: 12, 
+        padding: 16, 
+        marginBottom: 12, 
+        width: '48%',
+        minWidth: 150,
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3
+    },
+    cardInfo: { 
+        flex: 1 
+    },
+    cardTitle: { 
+        fontSize: 11, 
+        color: '#7f8c8d', 
+        marginBottom: 4, 
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5
+    },
+    cardValue: { 
+        fontSize: 20, 
+        fontWeight: 'bold', 
+        color: '#2c3e50' 
+    },
+    breakdownCard: { 
+        backgroundColor: '#fff', 
+        borderRadius: 12, 
+        padding: 20, 
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3
+    },
+    breakdownRow: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between',
+        marginBottom: 12
+    },
+    breakdownItem: { 
+        flex: 1, 
+        alignItems: 'center' 
+    },
+    bLabel: { 
+        fontSize: 12, 
+        color: '#7f8c8d', 
+        marginBottom: 6,
+        fontWeight: '500'
+    },
+    bValue: { 
+        fontSize: 22, 
+        fontWeight: 'bold', 
+        color: '#2c3e50' 
+    },
+    listCard: { 
+        backgroundColor: '#fff', 
+        borderRadius: 12, 
+        padding: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3
+    },
+    listItem: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        padding: 14, 
+        borderBottomWidth: 1, 
+        borderBottomColor: '#ecf0f1' 
+    },
+    itemText: { 
+        fontSize: 15, 
+        color: '#34495e',
+        fontWeight: '500'
+    },
+    itemValue: { 
+        fontSize: 15, 
+        fontWeight: 'bold', 
+        color: '#1cc88a' 
+    },
+    settingsCard: { 
+        backgroundColor: '#fff', 
+        borderRadius: 12, 
+        padding: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3
+    },
+    label: { 
+        fontSize: 14, 
+        color: '#34495e', 
+        marginBottom: 12,
+        fontWeight: '600'
+    },
+    inputRow: { 
+        flexDirection: 'row', 
+        gap: 12 
+    },
+    input: { 
+        flex: 1, 
+        backgroundColor: '#f8f9fa', 
+        borderRadius: 10, 
+        padding: 14, 
+        borderWidth: 1, 
+        borderColor: '#e1e8ed',
+        fontSize: 15
+    },
+    saveBtn: { 
+        backgroundColor: '#4e73df', 
+        borderRadius: 10, 
+        paddingHorizontal: 24, 
+        justifyContent: 'center',
+        shadowColor: '#4e73df',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+        elevation: 3
+    },
+    saveBtnText: { 
+        color: '#fff', 
+        fontWeight: '600',
+        fontSize: 14
+    },
+    activityCard: { 
+        flexDirection: 'row', 
+        backgroundColor: '#fff', 
+        padding: 16, 
+        borderRadius: 12, 
+        marginBottom: 10, 
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.08,
+        shadowRadius: 3,
+        elevation: 2
+    },
+    activityContent: { 
+        marginLeft: 14,
+        flex: 1
+    },
+    activityTitle: { 
+        fontSize: 14, 
+        fontWeight: '600', 
+        color: '#2c3e50',
+        marginBottom: 2
+    },
+    activityMsg: { 
+        fontSize: 13, 
+        color: '#7f8c8d' 
+    },
+    emptyText: { 
+        textAlign: 'center', 
+        color: '#95a5a6', 
+        padding: 24, 
+        fontSize: 14 
+    },
+    navigation: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between',
+        marginTop: 20,
+        marginBottom: 40,
+        gap: 10
+    },
+    navBtn: { 
+        flex: 1,
+        backgroundColor: '#2e59d9', 
+        paddingVertical: 16,
+        paddingHorizontal: 8,
+        borderRadius: 12, 
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#2e59d9',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.3,
+        shadowRadius: 5,
+        elevation: 4,
+        minHeight: 80
+    },
+    navIconContainer: {
+        marginBottom: 6
+    },
+    navText: { 
+        color: '#fff', 
+        fontWeight: '600', 
+        fontSize: 12,
+        textAlign: 'center'
+    }
 });
