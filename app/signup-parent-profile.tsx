@@ -184,6 +184,15 @@ const handleSignup = async () => {
     // Also save to role-specific collection
     await setDoc(doc(db, 'parents', user.uid), userData);
 
+    // Generate check-in code for parent (non-blocking)
+    try {
+      const { ensureCheckInCodeForCurrentUser } = await import('../services/CheckInCodeService');
+      await ensureCheckInCodeForCurrentUser();
+    } catch (error) {
+      console.error('Error generating check-in code (non-critical):', error);
+      // Don't block signup if code generation fails - will be generated on next app launch
+    }
+
     Alert.alert(i18n.t('signupSuccessful'));
     router.replace('/parent-feed');
   } catch (err: any) {

@@ -79,6 +79,7 @@ export default function HamburgerMenu() {
         items = [...items,
         { label: i18n.t('parentFeed') || 'Parent Feed', route: '/parent-feed', icon: 'home-outline' },
         { label: i18n.t('parentEditProfile') || 'Edit Profile', route: '/parent-edit-profile', icon: 'create-outline' },
+        { label: 'My QR Code', route: '/my-qr-code', icon: 'qr-code-outline' },
         { label: i18n.t('searchAcademies') || 'Search Academies', route: '/parent-search-academies', icon: 'school-outline' },
         { label: i18n.t('searchClinics') || 'Search Clinics', route: '/parent-search-clinics', icon: 'medical-outline' },
         { label: i18n.t('myBookings') || 'My Bookings', route: '/parent-bookings', icon: 'calendar-outline' },
@@ -97,6 +98,7 @@ export default function HamburgerMenu() {
       case 'clinic':
         items = [...items,
         { label: i18n.t('clinicFeed') || 'Clinic Feed', route: '/clinic-feed', icon: 'home-outline' },
+        { label: 'Scan Check-in', route: '/scan-checkin', icon: 'qr-code-outline', special: true },
         { label: i18n.t('editServices') || 'Edit Services', route: '/clinic-edit-services', icon: 'list-outline' },
         { label: i18n.t('editTimetable') || 'Edit Timetable', route: '/clinic-edit-timetable', icon: 'time-outline' },
         { label: i18n.t('myBookings') || 'My Bookings', route: '/clinic-bookings', icon: 'calendar-outline' },
@@ -105,6 +107,7 @@ export default function HamburgerMenu() {
       case 'academy':
         items = [...items,
         { label: i18n.t('academyFeed') || 'Feed', route: '/academy-feed', icon: 'home-outline' },
+        { label: 'Scan Check-in', route: '/scan-checkin', icon: 'qr-code-outline', special: true },
         { label: i18n.t('academyEditProfile') || 'Edit Profile', route: '/academy-edit-profile', icon: 'create-outline' },
         { label: i18n.t('academyUploadMedia') || 'Upload Media', route: '/academy-upload-media', icon: 'cloud-upload-outline' },
         { label: i18n.t('myBookings') || 'My Bookings', route: '/academy-bookings', icon: 'calendar-outline' },
@@ -115,6 +118,7 @@ export default function HamburgerMenu() {
         items = [...items,
         { label: i18n.t('feed') || 'Feed', route: '/player-feed', icon: 'home-outline' },
         { label: i18n.t('editProfile') || 'Edit Profile', route: '/player-profile', icon: 'create-outline' },
+        { label: 'My QR Code', route: '/my-qr-code', icon: 'qr-code-outline' },
         { label: i18n.t('uploadMedia') || 'Upload Media', route: '/player-upload-media', icon: 'cloud-upload-outline' },
         { label: i18n.t('messages') || 'Messages', route: '/player-messages', icon: 'chatbubbles-outline' },
         { label: i18n.t('myBookings') || 'My Bookings', route: '/player-bookings', icon: 'calendar-outline' },

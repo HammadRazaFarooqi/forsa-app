@@ -34,7 +34,16 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated() && request.auth.uid == userId;
       // Update: Owner can update their own profile, admin can update any user (for moderation)
-      allow update: if isOwner(userId) || isAdmin();
+      // Special rule: checkInCode can only be set once (if currently null) by owner
+      allow update: if isOwner(userId) && (
+        // Owner can update their own profile
+        (resource.data.checkInCode == null || 
+         request.resource.data.checkInCode == resource.data.checkInCode) ||
+        // Owner can set checkInCode only if it's currently null
+        (resource.data.checkInCode == null && 
+         request.resource.data.checkInCode != null &&
+         'checkInCodeCreatedAt' in request.resource.data)
+      ) || isAdmin(); // Admin can update any user
       allow delete: if false; // Users cannot be deleted
     }
     
@@ -218,6 +227,41 @@ service cloud.firestore {
                         request.resource.data.status in ['open', 'reviewed', 'resolved']);
       
       allow delete: if false; // Reports cannot be deleted
+    }
+
+    // Check-in codes collection (for uniqueness tracking)
+    match /checkInCodes/{code} {
+      // Create: Only if document doesn't exist and uid matches auth uid
+      allow create: if isAuthenticated() && 
+                       request.resource.data.uid == request.auth.uid &&
+                       !exists(/databases/$(database)/documents/checkInCodes/$(code));
+      
+      // Read: Users can read their own code reservation, admins can read all
+      allow read: if isAuthenticated() && 
+                     (resource.data.uid == request.auth.uid || isAdmin());
+      
+      // Update/Delete: Not allowed (codes are permanent)
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Check-ins collection
+    match /checkins/{checkinId} {
+      // Create: Only academy/clinic users can create check-ins
+      allow create: if isAuthenticated() && 
+                       (getUserRole() == 'academy' || getUserRole() == 'clinic') &&
+                       request.resource.data.createdBy == request.auth.uid &&
+                       request.resource.data.locationId == request.auth.uid &&
+                       request.resource.data.locationRole in ['academy', 'clinic'] &&
+                       request.resource.data.userRole in ['player', 'parent'];
+      
+      // Read: Admin can read all, users can read their own check-ins
+      allow read: if isAuthenticated() && 
+                     (isAdmin() || resource.data.userId == request.auth.uid);
+      
+      // Update/Delete: Not allowed (check-ins are immutable)
+      allow update: if false;
+      allow delete: if false;
     }
 
     // Settings (Admin settings like commission rate)

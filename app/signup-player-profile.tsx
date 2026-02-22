@@ -312,6 +312,15 @@ const handleSignup = async () => {
       highlightVideo: highlightVideo || '',
     });
 
+    // Generate check-in code for player (non-blocking)
+    try {
+      const { ensureCheckInCodeForCurrentUser } = await import('../services/CheckInCodeService');
+      await ensureCheckInCodeForCurrentUser();
+    } catch (error) {
+      console.error('Error generating check-in code (non-critical):', error);
+      // Don't block signup if code generation fails - will be generated on next app launch
+    }
+
     // Success - navigate to player feed
       router.replace('/player-feed');
   } catch (err: any) {
