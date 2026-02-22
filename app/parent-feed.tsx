@@ -1,18 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useRef } from 'react';
-import { Animated, Easing, FlatList, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { collection, onSnapshot, getFirestore, orderBy, query, where } from 'firebase/firestore';
+import React, { useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Easing, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
+import PostActionsMenu from '../components/PostActionsMenu';
 import i18n from '../locales/i18n';
-
-const mockPosts = [
-  { id: '1', academy: 'Elite Academy', content: i18n.t('samplePost1') || 'Check out our latest training session!', image: null },
-  { id: '2', academy: 'Future Stars', content: i18n.t('samplePost2') || 'New batch starting next week!', image: null },
-];
 
 export default function ParentFeedScreen() {
   const { openMenu } = useHamburgerMenu();
+  const [feed, setFeed] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
@@ -22,6 +22,60 @@ export default function ParentFeedScreen() {
       easing: Easing.out(Easing.exp),
       useNativeDriver: true,
     }).start();
+  }, []);
+
+  React.useEffect(() => {
+    setLoading(true);
+    const db = getFirestore();
+    const postsRef = collection(db, 'posts');
+    
+    // Parent feed: Show posts where visibleToRoles array-contains "parent" AND status == "active"
+    const q = query(
+      postsRef,
+      where('visibleToRoles', 'array-contains', 'parent'),
+      where('status', '==', 'active'),
+      orderBy('timestamp', 'desc')
+    );
+
+    // Set up real-time listener
+    const unsubscribe = onSnapshot(
+      q,
+      (querySnapshot) => {
+        const posts = querySnapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          ...doc.data() 
+        }));
+        setFeed(posts);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Parent feed listener error:', error);
+        // Fallback: try querying without status filter for backward compatibility
+        const fallbackQ = query(
+          postsRef,
+          where('visibleToRoles', 'array-contains', 'parent'),
+          orderBy('timestamp', 'desc')
+        );
+        onSnapshot(
+          fallbackQ,
+          (snapshot) => {
+            const posts = snapshot.docs
+              .map(doc => ({ id: doc.id, ...doc.data() }))
+              .filter((post: any) => !post.status || post.status === 'active');
+            setFeed(posts);
+            setLoading(false);
+          },
+          (fallbackError) => {
+            console.error('Parent feed fallback error:', fallbackError);
+            setFeed([]);
+            setLoading(false);
+          }
+        );
+      }
+    );
+
+    // Cleanup listener on unmount
+    return () => unsubscribe();
   }, []);
 
   return (
@@ -44,34 +98,82 @@ export default function ParentFeedScreen() {
 
       <HamburgerMenu />
 
-      <FlatList
-        data={mockPosts}
-        keyExtractor={item => item.id}
-            contentContainerStyle={styles.feedContent}
-            showsVerticalScrollIndicator={false}
-        renderItem={({ item }) => (
+      {loading ? (
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.loadingText}>{i18n.t('loading') || 'Loading...'}</Text>
+        </View>
+      ) : feed.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Ionicons name="newspaper-outline" size={64} color="#666" />
+          <Text style={styles.emptyText}>{i18n.t('noPosts') || 'No posts yet'}</Text>
+          <Text style={styles.emptySubtext}>{i18n.t('beFirstToPost') || 'Be the first to share something!'}</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={feed}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.feedContent}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }: any) => {
+            const timestamp = item.timestamp?.seconds 
+              ? new Date(item.timestamp.seconds * 1000) 
+              : item.createdAt?.seconds 
+                ? new Date(item.createdAt.seconds * 1000)
+                : null;
+
+            return (
               <View style={styles.postCard}>
                 <View style={styles.postHeader}>
                   <View style={styles.academyAvatar}>
-                    <Ionicons name="school" size={20} color="#000" />
+                    <Ionicons name="person-circle-outline" size={20} color="#000" />
                   </View>
                   <View style={styles.postHeaderText}>
-            <Text style={styles.academyName}>{item.academy}</Text>
-                    <Text style={styles.postTime}>{i18n.t('hoursAgo') || '2 hours ago'}</Text>
+                    <Text style={styles.academyName}>{item.author || 'User'}</Text>
+                    {timestamp && (
+                      <Text style={styles.postTime}>
+                        {timestamp.toLocaleDateString()}
+                      </Text>
+                    )}
                   </View>
+                  <PostActionsMenu
+                    postId={item.id}
+                    postOwnerId={item.ownerId}
+                    postOwnerRole={item.ownerRole}
+                    mediaUrl={item.mediaUrl}
+                    mediaType={item.mediaType}
+                    contentText={item.content}
+                    postTimestamp={item.timestamp || item.createdAt}
+                  />
                 </View>
-            <Text style={styles.postContent}>{item.content}</Text>
-            {item.image && <Image source={{ uri: item.image }} style={styles.postImage} />}
-          </View>
-        )}
-            ListEmptyComponent={
-              <View style={styles.emptyState}>
-                <Ionicons name="newspaper-outline" size={64} color="#666" />
-                <Text style={styles.emptyText}>{i18n.t('noPosts') || 'No posts yet'}</Text>
-                <Text style={styles.emptySubtext}>{i18n.t('beFirstToPost') || 'Be the first to share something!'}</Text>
-    </View>
-            }
-          />
+                
+                {/* Media display */}
+                {item.mediaUrl && (
+                  <View style={styles.mediaContainer}>
+                    {item.mediaType === 'video' ? (
+                      <Video
+                        source={{ uri: item.mediaUrl }}
+                        style={styles.mediaVideo}
+                        useNativeControls
+                        resizeMode={ResizeMode.CONTAIN}
+                        isLooping={false}
+                      />
+                    ) : (
+                      <Image 
+                        source={{ uri: item.mediaUrl }} 
+                        style={styles.postImage}
+                        resizeMode="cover"
+                      />
+                    )}
+                  </View>
+                )}
+                
+                <Text style={styles.postContent}>{item.content || ''}</Text>
+              </View>
+            );
+          }}
+        />
+      )}
         </Animated.View>
       </LinearGradient>
     </KeyboardAvoidingView>
@@ -170,6 +272,29 @@ const styles = StyleSheet.create({
     height: 200,
     borderRadius: 12,
     marginTop: 8,
+  },
+  mediaContainer: {
+    width: '100%',
+    marginVertical: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  mediaVideo: {
+    width: '100%',
+    height: 300,
+    backgroundColor: '#000',
+  },
+  loadingState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  loadingText: {
+    color: '#fff',
+    marginTop: 12,
+    fontSize: 16,
   },
   emptyState: {
     alignItems: 'center',

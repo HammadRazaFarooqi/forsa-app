@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import { auth, db } from '../lib/firebase';
 import { collection, addDoc, serverTimestamp, doc, setDoc, query, where, orderBy, onSnapshot, Unsubscribe } from 'firebase/firestore';
+import { getCurrentUserRole, getVisibleToRoles, type Role } from './UserRoleService';
 
 // Helper function to get environment variables with multiple fallbacks
 function getEnvVar(key: string, fallbackKey?: string): string | undefined {
@@ -258,21 +259,32 @@ export async function saveMediaToFirestore(
  * Create a feed item in /posts collection if feed uses posts
  * This links the media to the existing feed structure
  * @param mediaDoc - The media document data
+ * @param content - Optional text/caption for the post (default: empty string)
  * @returns Post document ID if created, null otherwise
  */
 export async function createFeedItemIfNeeded(
-  mediaDoc: MediaDoc
+  mediaDoc: MediaDoc,
+  content: string = ''
 ): Promise<string | null> {
   // Since feed reads from /posts, we'll create a post entry
   // that references the media
   try {
+    // Get the current user's role
+    const ownerRole = await getCurrentUserRole();
+    const visibleToRoles = getVisibleToRoles(ownerRole);
+
     const postData = {
       mediaId: mediaDoc.id,
       mediaUrl: mediaDoc.secureUrl,
       mediaType: mediaDoc.resourceType,
       ownerId: mediaDoc.ownerId,
+      ownerRole: ownerRole,
+      visibleToRoles: visibleToRoles,
+      visibilityScope: 'role_based',
+      status: 'active',
+      visibility: mediaDoc.visibility || 'public',
       author: 'User', // Can be enhanced to fetch user name
-      content: '', // Optional caption can be added later
+      content: content || '', // Caption/text content for the post
       timestamp: serverTimestamp(),
       createdAt: serverTimestamp(),
     };
@@ -327,12 +339,14 @@ export function subscribeMyMedia(
  * @param localUri - Local file URI
  * @param type - 'image' or 'video'
  * @param visibility - Visibility setting (default: 'public')
+ * @param content - Optional text/caption for the post (default: empty string)
  * @returns Object with mediaId and postId (if created)
  */
 export async function uploadAndSaveMedia(
   localUri: string,
   type: ResourceType,
-  visibility: Visibility = 'public'
+  visibility: Visibility = 'public',
+  content: string = ''
 ): Promise<{ mediaId: string; postId: string | null }> {
   try {
     // Step 1: Upload to Cloudinary
@@ -363,8 +377,8 @@ export async function uploadAndSaveMedia(
       error: null,
     };
 
-    // Step 4: Create feed item if needed
-    const postId = await createFeedItemIfNeeded(mediaDoc);
+    // Step 4: Create feed item if needed (pass content/caption)
+    const postId = await createFeedItemIfNeeded(mediaDoc, content);
 
     return { mediaId, postId };
   } catch (error: any) {

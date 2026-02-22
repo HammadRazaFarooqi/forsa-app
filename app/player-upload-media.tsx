@@ -63,7 +63,13 @@ export default function PlayerUploadMediaScreen() {
         setUploadProgress((prev) => ({ ...prev, [i]: true }));
 
         try {
-          await uploadAndSaveMedia(item.uri, item.type as ResourceType, 'public');
+          // Pass the caption/content along with the upload
+          await uploadAndSaveMedia(
+            item.uri, 
+            item.type as ResourceType, 
+            'public',
+            item.caption || '' // Pass the caption text
+          );
           uploadResults.push({ success: true });
         } catch (error: any) {
           console.error(`Upload failed for item ${i}:`, error);

@@ -1,7 +1,9 @@
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import { Animated, FlatList, I18nManager, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React from 'react';
+import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import i18n from '../locales/i18n';
+import AcademyHamburgerMenu from '../components/AcademyHamburgerMenu';
+import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 
 // Dummy feed data (should be replaced with real API data)
 const dummyFeed = [
@@ -10,31 +12,12 @@ const dummyFeed = [
 ];
 
 export default function AcademyHomeScreen({ navigation }: any) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const router = useRouter();
-  const [dropdownAnim] = useState(new Animated.Value(0)); // 0 = closed, 1 = open
-
-  const openMenu = () => {
-    setMenuOpen(true);
-    Animated.timing(dropdownAnim, {
-      toValue: 1,
-      duration: 220,
-      useNativeDriver: false,
-    }).start();
-  };
-  const closeMenu = () => {
-    Animated.timing(dropdownAnim, {
-      toValue: 0,
-      duration: 180,
-      useNativeDriver: false,
-    }).start(() => setMenuOpen(false));
-  };
-
-  // Dropdown Y position (below hamburger)
-  const dropdownTop = 48 + 8 + 48; // paddingTop + marginTop + hamburger height
+  const { visible, openMenu, closeMenu } = useHamburgerMenu();
 
   return (
     <View style={styles.container}>
+      <AcademyHamburgerMenu visible={visible} onClose={closeMenu} />
       {/* Title Bar with Hamburger */}
       <View style={styles.titleBar}>
         <TouchableOpacity style={styles.hamburgerBox} onPress={openMenu}>
@@ -44,41 +27,6 @@ export default function AcademyHomeScreen({ navigation }: any) {
         </TouchableOpacity>
         <Text style={styles.title}>{i18n.t('academyHomeTitle') || 'Academy Home'}</Text>
       </View>
-      {/* Dropdown Hamburger Menu */}
-      <Modal visible={menuOpen} animationType="none" transparent>
-        <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={closeMenu} />
-        <Animated.View style={[styles.dropdown, {
-          top: dropdownTop,
-          opacity: dropdownAnim,
-          transform: [{ scaleY: dropdownAnim }],
-        }]}
-        >
-          <ScrollView contentContainerStyle={{ paddingBottom: 10 }} showsVerticalScrollIndicator={false}>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { closeMenu(); router.push('/academy-upload-media'); }}>
-              <Text style={styles.menuText}>{i18n.t('uploadMedia') || 'Upload Media'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { closeMenu(); router.push('/academy-edit-profile'); }}>
-              <Text style={styles.menuText}>{i18n.t('editProfile') || 'Edit Profile'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={() => { closeMenu(); router.push('/signout'); }}>
-              <Text style={styles.menuText}>{i18n.t('signOut') || 'Sign Out'}</Text>
-            </TouchableOpacity>
-            {/* Language Switcher */}
-            <View style={styles.buttonRowSingle}>
-              <TouchableOpacity style={styles.chicButton} onPress={() => {
-                const newLang = i18n.locale === 'en' ? 'ar' : 'en';
-                const isRTL = newLang === 'ar';
-                i18n.locale = newLang;
-                I18nManager.forceRTL(isRTL);
-                I18nManager.swapLeftAndRightInRTL(isRTL);
-                closeMenu();
-              }}>
-                <Text style={styles.chicButtonText}>{i18n.locale === 'en' ? 'العربية' : 'English'}</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </Animated.View>
-      </Modal>
       {/* Feed */}
       <FlatList
         data={dummyFeed}
@@ -186,57 +134,4 @@ const styles = StyleSheet.create({
   cardType: { color: '#fff', fontSize: 14, marginBottom: 2 }, // White text
   cardContent: { color: '#fff', fontSize: 15, marginTop: 4 }, // White text
   empty: { color: '#888', textAlign: 'center', marginTop: 40 },
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.18)',
-    zIndex: 1,
-  },
-  dropdown: {
-    position: 'absolute',
-    left: 20,
-    width: 240,
-    backgroundColor: '#fff',
-    borderRadius: 18,
-    paddingVertical: 10,
-    zIndex: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 2, height: 4 },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 10,
-  },
-  menuItem: {
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  menuText: {
-    fontSize: 16,
-    color: '#000',
-    marginLeft: 12,
-  },
-  buttonRowSingle: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-  chicButton: {
-    backgroundColor: '#007bff',
-    borderRadius: 20,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginHorizontal: 4,
-  },
-  chicButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
 });

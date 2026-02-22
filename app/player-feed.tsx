@@ -7,7 +7,9 @@ import { ActivityIndicator, Animated, Easing, Image, Platform, ScrollView, Style
 import { Video, ResizeMode } from 'expo-av';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
+import PostActionsMenu from '../components/PostActionsMenu';
 import i18n from '../locales/i18n';
+import { auth } from '../lib/firebase';
 
 export default function PlayerFeedScreen() {
   const router = useRouter();
@@ -27,12 +29,21 @@ export default function PlayerFeedScreen() {
 
   React.useEffect(() => {
     setLoading(true);
+    const user = auth.currentUser;
+    if (!user) {
+      setFeed([]);
+      setLoading(false);
+      return;
+    }
+
     const db = getFirestore();
     const postsRef = collection(db, 'posts');
     
-    // Query posts ordered by timestamp (new media posts will have this field)
+    // Player feed: Show only posts where ownerId == currentUser.uid
+    // Also filter by status if field exists (backward compatibility)
     const q = query(
-      postsRef, 
+      postsRef,
+      where('ownerId', '==', user.uid),
       orderBy('timestamp', 'desc')
     );
 
@@ -40,10 +51,13 @@ export default function PlayerFeedScreen() {
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
-        const posts = querySnapshot.docs.map(doc => ({ 
-          id: doc.id, 
-          ...doc.data() 
-        }));
+        const posts = querySnapshot.docs
+          .map(doc => ({ 
+            id: doc.id, 
+            ...doc.data() 
+          }))
+          // Filter out deleted posts (backward compatibility: if status field exists, only show active)
+          .filter((post: any) => !post.status || post.status === 'active');
         setFeed(posts);
         setLoading(false);
       },
@@ -72,11 +86,22 @@ export default function PlayerFeedScreen() {
             <Ionicons name="person-circle-outline" size={24} color="#000" />
             <Text style={styles.feedAuthor}>{item.author || 'Anonymous'}</Text>
           </View>
-          {timestamp && (
-            <Text style={styles.feedTime}>
-              {timestamp.toLocaleDateString()}
-            </Text>
-          )}
+          <View style={styles.feedHeaderRight}>
+            {timestamp && (
+              <Text style={styles.feedTime}>
+                {timestamp.toLocaleDateString()}
+              </Text>
+            )}
+            <PostActionsMenu
+              postId={item.id}
+              postOwnerId={item.ownerId}
+              postOwnerRole={item.ownerRole}
+              mediaUrl={item.mediaUrl}
+              mediaType={item.mediaType}
+              contentText={item.content}
+              postTimestamp={item.timestamp || item.createdAt}
+            />
+          </View>
         </View>
         
         {/* Media display */}
@@ -241,6 +266,11 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+  },
+  feedHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   feedAuthorContainer: {
     flexDirection: 'row',

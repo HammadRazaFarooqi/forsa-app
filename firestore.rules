@@ -131,12 +131,43 @@ service cloud.firestore {
     
     // Posts
     match /posts/{postId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
+      // Helper function to get allowed visibleToRoles for an ownerRole
+      function getAllowedVisibleToRoles(ownerRole) {
+        return ownerRole == 'player' ? ['player', 'agent', 'academy', 'clinic', 'parent'] :
+               ownerRole == 'agent' ? ['agent', 'academy', 'clinic'] :
+               ownerRole == 'academy' ? ['academy', 'clinic', 'parent'] :
+               ownerRole == 'clinic' ? ['clinic'] :
+               ownerRole == 'parent' ? ['parent'] :
+               ['player', 'agent', 'academy', 'clinic', 'parent']; // default
+      }
+      
+      // Read: Authenticated users can read active posts
+      // Note: Role-based filtering is handled in queries using array-contains
+      // This rule ensures only active posts are readable (unless you're the owner)
+      allow read: if isAuthenticated() && (
+        // Owner can always read their own posts (even if deleted)
+        resource.data.ownerId == request.auth.uid ||
+        // Others can only read active posts (status == 'active' or status field missing for backward compatibility)
+        (resource.data.status == 'active' || !resource.data.status)
+      );
+      
+      // Create: Must be authenticated, ownerId must match auth uid, and ownerRole/visibleToRoles must be valid
+      allow create: if isAuthenticated() && 
+                       request.resource.data.ownerId == request.auth.uid &&
+                       request.resource.data.ownerRole != null &&
+                       request.resource.data.visibleToRoles != null &&
+                       request.resource.data.visibleToRoles == getAllowedVisibleToRoles(request.resource.data.ownerRole) &&
+                       (request.resource.data.status == 'active' || request.resource.data.status == null);
+      
+      // Update: Only owner can update, and cannot change ownerId or ownerRole
       allow update: if isAuthenticated() && 
-                       resource.data.userId == request.auth.uid;
+                       resource.data.ownerId == request.auth.uid &&
+                       request.resource.data.ownerId == resource.data.ownerId &&
+                       request.resource.data.ownerRole == resource.data.ownerRole;
+      
+      // Delete: Only owner can delete (by setting status to 'deleted')
       allow delete: if isAuthenticated() && 
-                       resource.data.userId == request.auth.uid;
+                       resource.data.ownerId == request.auth.uid;
     }
     
     // Media

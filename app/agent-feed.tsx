@@ -1,11 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { collection, getDocs, getFirestore, orderBy, query } from 'firebase/firestore';
+import { collection, onSnapshot, getFirestore, orderBy, query, where } from 'firebase/firestore';
 import React, { useRef, useState } from 'react';
-import { Animated, Easing, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
+import PostActionsMenu from '../components/PostActionsMenu';
 import i18n from '../locales/i18n';
 
 export default function AgentFeedScreen() {
@@ -25,20 +27,57 @@ export default function AgentFeedScreen() {
   }, []);
 
   React.useEffect(() => {
-    const fetchFeed = async () => {
-      setLoading(true);
-      try {
-        const db = getFirestore();
-        const q = query(collection(db, 'agentPosts'), orderBy('timestamp', 'desc'));
-        const querySnapshot = await getDocs(q);
-        const posts = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    setLoading(true);
+    const db = getFirestore();
+    const postsRef = collection(db, 'posts');
+    
+    // Agent feed: Show posts where visibleToRoles array-contains "agent" AND status == "active"
+    const q = query(
+      postsRef,
+      where('visibleToRoles', 'array-contains', 'agent'),
+      where('status', '==', 'active'),
+      orderBy('timestamp', 'desc')
+    );
+
+    // Set up real-time listener
+    const unsubscribe = onSnapshot(
+      q,
+      (querySnapshot) => {
+        const posts = querySnapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          ...doc.data() 
+        }));
         setFeed(posts);
-      } catch (e) {
-        setFeed([]);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Agent feed listener error:', error);
+        // Fallback: try querying without status filter for backward compatibility
+        const fallbackQ = query(
+          postsRef,
+          where('visibleToRoles', 'array-contains', 'agent'),
+          orderBy('timestamp', 'desc')
+        );
+        onSnapshot(
+          fallbackQ,
+          (snapshot) => {
+            const posts = snapshot.docs
+              .map(doc => ({ id: doc.id, ...doc.data() }))
+              .filter((post: any) => !post.status || post.status === 'active');
+            setFeed(posts);
+            setLoading(false);
+          },
+          (fallbackError) => {
+            console.error('Agent feed fallback error:', fallbackError);
+            setFeed([]);
+            setLoading(false);
+          }
+        );
       }
-      setLoading(false);
-    };
-    fetchFeed();
+    );
+
+    // Cleanup listener on unmount
+    return () => unsubscribe();
   }, []);
 
   return (
@@ -63,20 +102,69 @@ export default function AgentFeedScreen() {
 
       {loading ? (
             <View style={styles.loadingState}>
+              <ActivityIndicator size="large" color="#fff" />
               <Text style={styles.loadingText}>{i18n.t('loading') || 'Loading...'}</Text>
             </View>
       ) : (
         <FlatList
           data={feed}
-              renderItem={({ item }) => (
-                <View style={styles.feedCard}>
-                  <Text style={styles.feedAuthor}>{item.author || 'Agent'}</Text>
-                  <Text style={styles.feedContent}>{item.content}</Text>
-                  {item.timestamp && (
-                    <Text style={styles.feedTime}>{i18n.t('hoursAgo') || '2 hours ago'}</Text>
-                  )}
-                </View>
-              )}
+              renderItem={({ item }: any) => {
+                const timestamp = item.timestamp?.seconds 
+                  ? new Date(item.timestamp.seconds * 1000) 
+                  : item.createdAt?.seconds 
+                    ? new Date(item.createdAt.seconds * 1000)
+                    : null;
+
+                return (
+                  <View style={styles.feedCard}>
+                    <View style={styles.feedHeader}>
+                      <View style={styles.feedAuthorContainer}>
+                        <Ionicons name="person-circle-outline" size={24} color="#000" />
+                        <Text style={styles.feedAuthor}>{item.author || 'User'}</Text>
+                      </View>
+                      <View style={styles.feedHeaderRight}>
+                        {timestamp && (
+                          <Text style={styles.feedTime}>
+                            {timestamp.toLocaleDateString()}
+                          </Text>
+                        )}
+                        <PostActionsMenu
+                          postId={item.id}
+                          postOwnerId={item.ownerId}
+                          postOwnerRole={item.ownerRole}
+                          mediaUrl={item.mediaUrl}
+                          mediaType={item.mediaType}
+                          contentText={item.content}
+                          postTimestamp={item.timestamp || item.createdAt}
+                        />
+                      </View>
+                    </View>
+                    
+                    {/* Media display */}
+                    {item.mediaUrl && (
+                      <View style={styles.mediaContainer}>
+                        {item.mediaType === 'video' ? (
+                          <Video
+                            source={{ uri: item.mediaUrl }}
+                            style={styles.mediaVideo}
+                            useNativeControls
+                            resizeMode={ResizeMode.CONTAIN}
+                            isLooping={false}
+                          />
+                        ) : (
+                          <Image 
+                            source={{ uri: item.mediaUrl }} 
+                            style={styles.mediaImage}
+                            resizeMode="cover"
+                          />
+                        )}
+                      </View>
+                    )}
+                    
+                    <Text style={styles.feedContent}>{item.content || ''}</Text>
+                  </View>
+                );
+              }}
           keyExtractor={item => item.id}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
@@ -151,21 +239,56 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 5,
   },
+  feedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  feedHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  feedAuthorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   feedAuthor: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#000',
-    marginBottom: 8,
   },
   feedContent: {
     fontSize: 15,
     color: '#333',
     lineHeight: 22,
-    marginBottom: 8,
+    marginTop: 12,
   },
   feedTime: {
     fontSize: 12,
     color: '#999',
+  },
+  mediaContainer: {
+    width: '100%',
+    marginVertical: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  mediaImage: {
+    width: '100%',
+    height: 300,
+    backgroundColor: '#000',
+  },
+  mediaVideo: {
+    width: '100%',
+    height: 300,
+    backgroundColor: '#000',
   },
   loadingState: {
     flex: 1,

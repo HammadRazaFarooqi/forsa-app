@@ -10,84 +10,60 @@ interface AcademyHamburgerMenuProps {
 
 const AcademyHamburgerMenu: React.FC<AcademyHamburgerMenuProps> = ({ visible, onClose }) => {
   const router = useRouter();
-  // Fallback translations (Google Translate for Arabic)
-  const fallback = {
-    en: {
-      assistance: 'Assistance & Extras',
-      feed: 'Feed',
-      editProfile: 'Edit Profile',
-      uploadMedia: 'Upload Media',
-      messages: 'Messages',
-      signOut: 'Sign Out',
-    },
-    ar: {
-      assistance: 'المساعدة والإضافات',
-      feed: 'المنشورات',
-      editProfile: 'تعديل الملف الشخصي',
-      uploadMedia: 'رفع الوسائط',
-      messages: 'الرسائل',
-      signOut: 'تسجيل الخروج',
-    },
-  };
-  const lang = i18n.locale === 'ar' ? 'ar' : 'en';
-  function getLabel(key: string, fallbackLabel: string) {
-    const t = i18n.t(key);
-    if (!t || t === key || t === undefined || t === null) return fallbackLabel;
-    return t;
-  }
   const options = [
-    { label: getLabel('academyAssistance', fallback[lang].assistance), route: '/academy-services', highlight: true },
-    { label: getLabel('academyFeed', fallback[lang].feed), route: '/academy-feed' },
-    { label: getLabel('academyEditProfile', fallback[lang].editProfile), route: '/academy-edit-profile' },
-    { label: getLabel('academyUploadMedia', fallback[lang].uploadMedia), route: '/academy-upload-media' },
-    { label: getLabel('academyMessages', fallback[lang].messages), route: '/academy-messages' },
-    { label: getLabel('signOut', fallback[lang].signOut), route: '/signout' },
+    {
+      label: i18n.t('academyAssistance') || 'Assistance & Extras',
+      route: '/academy-services',
+      special: true,
+    },
+    { label: i18n.t('academyFeed') || 'Academy Feed', route: '/academy-feed' },
+    { label: i18n.t('academyEditProfile') || 'Edit Profile', route: '/academy-edit-profile' },
+    { label: i18n.t('academyUploadMedia') || 'Upload Media', route: '/academy-upload-media' },
+    { label: i18n.t('myBookings') || 'My Bookings', route: '/academy-bookings' },
+    { label: i18n.t('signOut') || 'Sign Out', route: '/signout' },
   ];
   return (
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onClose}>
         <View style={styles.menuBox}>
-          {options.map((item, idx) => (
-            <React.Fragment key={item.route}>
-              {idx === 1 && <View style={styles.menuDivider} />}
-              <TouchableOpacity
-                style={[styles.menuItem, item.highlight && styles.menuItemGold]}
-                onPress={() => {
-                  onClose();
-                  if (item.route === '/academy-feed') {
-                    router.replace(item.route as any);
-                  } else {
-                    router.push(item.route as any);
-                  }
-                }}
-                activeOpacity={item.highlight ? 0.85 : 1}
-              >
-                {item.highlight && false /* goldOverlay removed, keep white background */}
-                <Text style={[
-                  styles.menuText,
-                  item.highlight && styles.menuTextGold,
-                ]}>{item.label}</Text>
-              </TouchableOpacity>
-            </React.Fragment>
+          {options.map(item => (
+            <TouchableOpacity
+              key={item.route}
+              style={[styles.menuItem, item.special && styles.specialMenuItem]}
+              onPress={() => {
+                onClose();
+                if (item.route === '/academy-feed') {
+                  router.replace(item.route as any);
+                } else {
+                  router.push(item.route as any);
+                }
+              }}
+            >
+              <Text style={[styles.menuText, item.special && styles.specialMenuText]}>{item.label}</Text>
+            </TouchableOpacity>
           ))}
-          <View style={styles.languageRow}>
-            <TouchableOpacity style={[styles.langBtn, { backgroundColor: '#000' }]} onPress={() => { 
-              i18n.locale = 'en';
-              I18nManager.forceRTL(false);
-              I18nManager.swapLeftAndRightInRTL(false);
+          <TouchableOpacity
+            style={{
+              backgroundColor: '#111',
+              borderRadius: 12,
+              marginTop: 16,
+              alignSelf: 'stretch',
+              alignItems: 'center',
+              paddingVertical: 10,
+            }}
+            onPress={() => {
+              const newLang = i18n.locale === 'en' ? 'ar' : 'en';
+              const isRTL = newLang === 'ar';
+              i18n.locale = newLang;
+              I18nManager.forceRTL(isRTL);
+              I18nManager.swapLeftAndRightInRTL(isRTL);
               onClose();
-            }}>
-              <Text style={[styles.langText, { color: '#fff' }]}>English</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.langBtn, { backgroundColor: '#fff', borderWidth: 1, borderColor: '#000' }]} onPress={() => { 
-              i18n.locale = 'ar';
-              I18nManager.forceRTL(true);
-              I18nManager.swapLeftAndRightInRTL(true);
-              onClose();
-            }}>
-              <Text style={[styles.langText, { color: '#000' }]}>العربية</Text>
-            </TouchableOpacity>
-          </View>
+            }}
+          >
+            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>
+              {i18n.locale === 'en' ? 'العربية' : 'English'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </TouchableOpacity>
     </Modal>
@@ -102,7 +78,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   menuBox: {
-    marginTop: 100,
+    marginTop: 80,
     marginLeft: 18,
     backgroundColor: '#fff',
     borderRadius: 20,
@@ -119,14 +95,6 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 0,
     width: '100%',
-    borderRadius: 12,
-  },
-  menuItemGold: {
-    // No background or border, keep as normal
-  },
-  goldOverlay: {
-    // Remove overlay, keep background white
-    display: 'none',
   },
   menuText: {
     fontSize: 17,
@@ -134,43 +102,26 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     letterSpacing: 0.5,
   },
-  menuTextGold: {
-    color: '#bfa100',
-    fontSize: 18,
-    fontWeight: 'bold',
-    textShadowColor: '#fffbe6',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
-    textTransform: 'uppercase',
-    letterSpacing: 1.5,
-    // Subtle glow only
-    shadowColor: '#fffbe6',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
+  specialMenuItem: {
+    backgroundColor: '#faf6e7', // softer off-white
+    borderRadius: 10,
+    marginBottom: 8,
+    marginTop: -2,
+    shadowColor: '#ffe066', // softer gold shadow
+    shadowOpacity: 0.25,
     shadowRadius: 6,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#ffe066',
   },
-  menuDivider: {
-    width: '100%',
-    height: 1,
-    backgroundColor: '#eee',
-    marginVertical: 10,
-  },
-  languageRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 18,
-    alignSelf: 'center',
-  },
-  langBtn: {
-    borderRadius: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    marginHorizontal: 2,
-  },
-  langText: {
-    fontSize: 16,
+  specialMenuText: {
+    color: '#bfa100', // softer gold
+    textShadowColor: 'rgba(255, 224, 102, 0.5)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
     fontWeight: 'bold',
-    letterSpacing: 0.5,
+    fontSize: 17,
+    letterSpacing: 0.2,
   },
 });
 export default AcademyHamburgerMenu;

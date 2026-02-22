@@ -1,11 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { collection, getDocs, getFirestore, orderBy, query } from 'firebase/firestore';
+import { collection, onSnapshot, getFirestore, orderBy, query, where } from 'firebase/firestore';
 import React, { useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
+import PostActionsMenu from '../components/PostActionsMenu';
 import i18n from '../locales/i18n';
 
 export default function AcademyFeedScreen() {
@@ -25,65 +27,133 @@ export default function AcademyFeedScreen() {
   }, []);
 
   React.useEffect(() => {
-    const fetchFeed = async () => {
-      setLoading(true);
-      try {
-        const db = getFirestore();
-        const academyQuery = query(collection(db, 'academyPosts'), orderBy('timestamp', 'desc'));
-        const agentQuery = query(collection(db, 'agentPosts'), orderBy('timestamp', 'desc'));
-        const playerQuery = query(collection(db, 'playerPosts'), orderBy('timestamp', 'desc'));
+    setLoading(true);
+    const db = getFirestore();
+    const postsRef = collection(db, 'posts');
+    
+    // Academy feed: Show posts where visibleToRoles array-contains "academy" AND status == "active"
+    const q = query(
+      postsRef,
+      where('visibleToRoles', 'array-contains', 'academy'),
+      where('status', '==', 'active'),
+      orderBy('timestamp', 'desc')
+    );
 
-        const [academySnap, agentSnap, playerSnap] = await Promise.all([
-          getDocs(academyQuery),
-          getDocs(agentQuery),
-          getDocs(playerQuery),
-        ]);
-
-        const posts = [
-          ...academySnap.docs.map(doc => ({ ...doc.data(), id: doc.id, type: 'academy' })),
-          ...agentSnap.docs.map(doc => ({ ...doc.data(), id: doc.id, type: 'agent' })),
-          ...playerSnap.docs.map(doc => ({ ...doc.data(), id: doc.id, type: 'player' })),
-        ];
-        posts.sort((a: any, b: any) => {
-          const aTime = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp?._seconds ? a.timestamp._seconds * 1000 : 0);
-          const bTime = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp?._seconds ? b.timestamp._seconds * 1000 : 0);
-          return bTime - aTime;
-        });
+    // Set up real-time listener
+    const unsubscribe = onSnapshot(
+      q,
+      (querySnapshot) => {
+        const posts = querySnapshot.docs.map(doc => ({ 
+          id: doc.id, 
+          ...doc.data(),
+          type: doc.data().ownerRole || 'unknown'
+        }));
         setFeed(posts);
-      } catch (e) {
-        setFeed([]);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Academy feed listener error:', error);
+        // Fallback: try querying without status filter for backward compatibility
+        const fallbackQ = query(
+          postsRef,
+          where('visibleToRoles', 'array-contains', 'academy'),
+          orderBy('timestamp', 'desc')
+        );
+        onSnapshot(
+          fallbackQ,
+          (snapshot) => {
+            const posts = snapshot.docs
+              .map(doc => ({ 
+                id: doc.id, 
+                ...doc.data(),
+                type: doc.data().ownerRole || 'unknown'
+              }))
+              .filter((post: any) => !post.status || post.status === 'active');
+            setFeed(posts);
+            setLoading(false);
+          },
+          (fallbackError) => {
+            console.error('Academy feed fallback error:', fallbackError);
+            setFeed([]);
+            setLoading(false);
+          }
+        );
       }
-      setLoading(false);
-    };
-    fetchFeed();
+    );
+
+    // Cleanup listener on unmount
+    return () => unsubscribe();
   }, []);
 
-  const renderFeedItem = ({ item }: any) => (
-    <View style={styles.feedCard}>
-      <View style={styles.feedHeader}>
-        <View style={styles.feedAuthorContainer}>
-          <Ionicons 
-            name={item.type === 'agent' ? 'person-circle' : item.type === 'player' ? 'football' : 'school'} 
-            size={24} 
-            color={item.type === 'agent' ? '#007AFF' : item.type === 'player' ? '#bfa100' : '#000'} 
-            style={styles.feedIcon}
-          />
-          <View>
-            <Text style={[styles.feedAuthor, item.type === 'agent' && styles.feedAuthorAgent, item.type === 'player' && styles.feedAuthorPlayer]}>
-              {item.author || 'Unknown'}
-            </Text>
-            <Text style={styles.feedType}>
-              {item.type === 'agent' ? '(Agent)' : item.type === 'player' ? '(Player)' : '(Academy)'}
-      </Text>
+  const renderFeedItem = ({ item }: any) => {
+    const timestamp = item.timestamp?.seconds 
+      ? new Date(item.timestamp.seconds * 1000) 
+      : item.createdAt?.seconds 
+        ? new Date(item.createdAt.seconds * 1000)
+        : null;
+
+    return (
+      <View style={styles.feedCard}>
+        <View style={styles.feedHeader}>
+          <View style={styles.feedAuthorContainer}>
+            <Ionicons 
+              name={item.type === 'agent' ? 'person-circle' : item.type === 'player' ? 'football' : 'school'} 
+              size={24} 
+              color={item.type === 'agent' ? '#007AFF' : item.type === 'player' ? '#bfa100' : '#000'} 
+              style={styles.feedIcon}
+            />
+            <View>
+              <Text style={[styles.feedAuthor, item.type === 'agent' && styles.feedAuthorAgent, item.type === 'player' && styles.feedAuthorPlayer]}>
+                {item.author || 'Unknown'}
+              </Text>
+              <Text style={styles.feedType}>
+                {item.type === 'agent' ? '(Agent)' : item.type === 'player' ? '(Player)' : '(Academy)'}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.feedHeaderRight}>
+            {timestamp && (
+              <Text style={styles.feedTime}>
+                {timestamp.toLocaleDateString()}
+              </Text>
+            )}
+            <PostActionsMenu
+              postId={item.id}
+              postOwnerId={item.ownerId}
+              postOwnerRole={item.ownerRole || item.type}
+              mediaUrl={item.mediaUrl}
+              mediaType={item.mediaType}
+              contentText={item.content}
+              postTimestamp={item.timestamp || item.createdAt}
+            />
           </View>
         </View>
+        
+        {/* Media display */}
+        {item.mediaUrl && (
+          <View style={styles.mediaContainer}>
+            {item.mediaType === 'video' ? (
+              <Video
+                source={{ uri: item.mediaUrl }}
+                style={styles.mediaVideo}
+                useNativeControls
+                resizeMode={ResizeMode.CONTAIN}
+                isLooping={false}
+              />
+            ) : (
+              <Image 
+                source={{ uri: item.mediaUrl }} 
+                style={styles.mediaImage}
+                resizeMode="cover"
+              />
+            )}
+          </View>
+        )}
+        
+        <Text style={styles.feedContent}>{item.content || ''}</Text>
       </View>
-      <Text style={styles.feedContent}>{item.content || ''}</Text>
-      {item.timestamp && (
-        <Text style={styles.feedTime}>{i18n.t('hoursAgo') || '2 hours ago'}</Text>
-      )}
-    </View>
-  );
+    );
+  };
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -187,6 +257,14 @@ const styles = StyleSheet.create({
   },
   feedHeader: {
     marginBottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  feedHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   feedAuthorContainer: {
     flexDirection: 'row',
@@ -215,11 +293,28 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#222',
     lineHeight: 22,
-    marginBottom: 8,
+    marginTop: 12,
   },
   feedTime: {
     fontSize: 12,
     color: '#999',
+  },
+  mediaContainer: {
+    width: '100%',
+    marginVertical: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#f0f0f0',
+  },
+  mediaImage: {
+    width: '100%',
+    height: 300,
+    backgroundColor: '#000',
+  },
+  mediaVideo: {
+    width: '100%',
+    height: 300,
+    backgroundColor: '#000',
   },
   loadingState: {
     flex: 1,
