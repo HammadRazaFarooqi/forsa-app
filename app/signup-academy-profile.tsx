@@ -21,7 +21,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { uploadImageToS3 } from '../lib/awsS3Helpers';
+import { uploadImageToStorage } from '../lib/firebaseHelpers';
 import { auth, db } from '../lib/firebase';
 import {
   validateAddress,
@@ -165,10 +165,10 @@ const SignupAcademy = () => {
       const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
       const user = userCredential.user;
 
-      // Step 2: Upload profile photo to AWS S3
+      // Step 2: Upload profile photo to Firebase Storage
       let profilePhotoUrl = '';
     if (profileImage) {
-        profilePhotoUrl = await uploadImageToS3(
+        profilePhotoUrl = await uploadImageToStorage(
           profileImage,
           `users/${user.uid}/profile.jpg`
         );

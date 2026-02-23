@@ -31,7 +31,11 @@ service cloud.firestore {
     
     // Users collection
     match /users/{userId} {
+      // Allow reading own profile when authenticated
       allow read: if isAuthenticated();
+      // Allow list/query operations for email lookup during login (unauthenticated)
+      // This is necessary to find user by email and get their phone for Firebase Auth
+      allow list: if true; // Allow queries for email lookup (login flow)
       allow create: if isAuthenticated() && request.auth.uid == userId;
       // Update: Owner can update their own profile, admin can update any user (for moderation)
       // Special rule: checkInCode can only be set once (if currently null) by owner

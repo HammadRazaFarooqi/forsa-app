@@ -186,6 +186,10 @@ app.use('/api/users', userRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/admin', adminRoutes);
 
+// Import media routes
+import mediaRoutes from './routes/media.routes';
+app.use('/api/media', mediaRoutes);
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({

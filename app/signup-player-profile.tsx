@@ -22,7 +22,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { uploadImageToS3 } from '../lib/awsS3Helpers';
+import { uploadImageToStorage } from '../lib/firebaseHelpers';
 import { auth, db } from '../lib/firebase';
 import {
   validateCity,
@@ -264,19 +264,19 @@ const handleSignup = async () => {
     const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
     const user = userCredential.user;
 
-    // Step 2: Upload images to AWS S3
+    // Step 2: Upload images to Firebase Storage
     let profilePhotoUrl = '';
     let nationalIdPhotoUrl = '';
 
     if (profilePhoto) {
-      profilePhotoUrl = await uploadImageToS3(
+      profilePhotoUrl = await uploadImageToStorage(
         profilePhoto,
         `users/${user.uid}/profile.jpg`
       );
     }
 
     if (nationalIdPhoto) {
-      nationalIdPhotoUrl = await uploadImageToS3(
+      nationalIdPhotoUrl = await uploadImageToStorage(
         nationalIdPhoto,
         `users/${user.uid}/nationalId.jpg`
       );

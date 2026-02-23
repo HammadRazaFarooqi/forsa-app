@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import { auth, db } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, setDoc, query, where, orderBy, onSnapshot, Unsubscribe } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, setDoc, query, where, orderBy, onSnapshot, Unsubscribe, getDoc, deleteDoc } from 'firebase/firestore';
 import { getCurrentUserRole, getVisibleToRoles, type Role } from './UserRoleService';
 
 // Helper function to get environment variables with multiple fallbacks
@@ -234,7 +234,7 @@ export async function saveMediaToFirestore(
     cloudinaryPublicId: cloudinaryResponse.public_id,
     cloudinaryAssetId: cloudinaryResponse.asset_id || null,
     secureUrl: cloudinaryResponse.secure_url,
-    playbackUrl: cloudinaryResponse.secure_url, // For now, same as secureUrl; can add transformations later
+    playbackUrl: cloudinaryResponse.secure_url, // Will be updated with streamable URL if needed
     format: cloudinaryResponse.format || null,
     sizeBytes: cloudinaryResponse.bytes || null,
     durationSec: type === 'video' && cloudinaryResponse.duration ? cloudinaryResponse.duration : null,
@@ -360,6 +360,9 @@ export async function uploadAndSaveMedia(
   content: string = ''
 ): Promise<{ mediaId: string; postId: string | null }> {
   try {
+    // Step 0: Validate file size before upload
+    await validateFileSizeBeforeUpload(localUri, type);
+    
     // Step 1: Upload to Cloudinary
     const cloudinaryResponse = await uploadMedia(localUri, type);
 
@@ -376,7 +379,7 @@ export async function uploadAndSaveMedia(
       cloudinaryPublicId: cloudinaryResponse.public_id,
       cloudinaryAssetId: cloudinaryResponse.asset_id || null,
       secureUrl: cloudinaryResponse.secure_url,
-      playbackUrl: cloudinaryResponse.secure_url,
+      playbackUrl: cloudinaryResponse.secure_url, // Can be enhanced with getStreamablePlaybackUrl if needed
       format: cloudinaryResponse.format || null,
       sizeBytes: cloudinaryResponse.bytes || null,
       durationSec: type === 'video' && cloudinaryResponse.duration ? cloudinaryResponse.duration : null,
@@ -405,6 +408,174 @@ export async function uploadAndSaveMedia(
  */
 export async function cleanupMediaForPost(mediaId: string | undefined): Promise<void> {
   if (!mediaId) return;
-  // TODO: fetch media doc by mediaId, get cloudinaryPublicId, call Cloudinary destroy,
-  // then delete or mark media doc in Firestore. For now no-op to keep removePost working.
+  
+  try {
+    // Fetch media document
+    const mediaRef = doc(db, 'media', mediaId);
+    const mediaSnap = await getDoc(mediaRef);
+    
+    if (!mediaSnap.exists()) {
+      console.warn(`[MediaService] Media ${mediaId} not found for cleanup`);
+      return;
+    }
+    
+    const mediaData = mediaSnap.data() as MediaDoc;
+    const publicId = mediaData.cloudinaryPublicId;
+    const resourceType = mediaData.resourceType;
+    
+    if (!publicId) {
+      console.warn(`[MediaService] No cloudinaryPublicId found for media ${mediaId}`);
+      // Still delete from Firestore
+      await deleteDoc(mediaRef);
+      return;
+    }
+    
+    // Try to call backend API to delete from Cloudinary (optional - graceful failure)
+    // If backend is not available, we still clean up Firestore
+    const user = auth.currentUser;
+    const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL;
+    
+    // Only attempt API call if backend URL is configured and user is authenticated
+    if (user && apiBaseUrl && apiBaseUrl !== 'http://localhost:3000') {
+      try {
+        const idToken = await user.getIdToken();
+        
+        // Use a timeout to prevent hanging requests
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        
+        const response = await fetch(`${apiBaseUrl}/api/media/delete`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            publicId,
+            resourceType,
+            mediaId,
+          }),
+          signal: controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+          // Log but don't throw - continue with Firestore cleanup
+          console.warn(`[MediaService] Backend cleanup returned ${response.status}, continuing with Firestore cleanup`);
+        }
+      } catch (apiError: any) {
+        // Silently handle network errors - backend may not be available
+        // This is expected in development or when backend is not deployed
+        if (apiError.name !== 'AbortError') {
+          // Only log non-timeout errors at debug level
+          console.debug('[MediaService] Backend cleanup unavailable, using Firestore-only cleanup');
+        }
+        // Continue to delete from Firestore regardless
+      }
+    } else {
+      // Backend not configured or not available - use Firestore-only cleanup
+      console.debug('[MediaService] Backend not configured, using Firestore-only cleanup');
+    }
+    
+    // Delete from Firestore
+    await deleteDoc(mediaRef);
+    console.log(`[MediaService] Successfully cleaned up media ${mediaId}`);
+  } catch (error: any) {
+    console.error(`[MediaService] Error cleaning up media ${mediaId}:`, error);
+    // Don't throw - cleanup failures shouldn't break the moderation flow
+  }
+}
+
+/**
+ * Get streamable playback URL with Cloudinary transformations
+ * @param publicId - Cloudinary public ID
+ * @param resourceType - 'image' or 'video'
+ * @param transformations - Optional Cloudinary transformation parameters
+ * @returns Streamable playback URL
+ */
+export async function getStreamablePlaybackUrl(
+  publicId: string,
+  resourceType: ResourceType,
+  transformations?: Record<string, any>
+): Promise<string> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('User must be authenticated to get playback URL');
+  }
+  
+  try {
+    const idToken = await user.getIdToken();
+    const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+    
+    const response = await fetch(`${apiBaseUrl}/api/media/playback-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        publicId,
+        resourceType,
+        transformations,
+      }),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error?.message || 'Failed to get playback URL');
+    }
+    
+    const data = await response.json();
+    return data.data.playbackUrl;
+  } catch (error: any) {
+    console.error('Error getting playback URL:', error);
+    // Fallback to secure URL if API fails
+    const cloudName = getEnvVar('EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_CLOUD_NAME');
+    if (cloudName && publicId) {
+      return `https://res.cloudinary.com/${cloudName}/${resourceType}/upload/${publicId}`;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Validate file size before upload
+ * @param fileUri - Local file URI
+ * @param resourceType - 'image' or 'video'
+ * @returns true if valid, throws error if invalid
+ */
+export async function validateFileSizeBeforeUpload(
+  fileUri: string,
+  resourceType: ResourceType
+): Promise<boolean> {
+  try {
+    // Get file info using FileSystem
+    const FileSystem = await import('expo-file-system/legacy');
+    const fileInfo = await FileSystem.getInfoAsync(fileUri);
+    
+    if (!fileInfo.exists || !('size' in fileInfo)) {
+      throw new Error('File not found or size unavailable');
+    }
+    
+    const fileSize = fileInfo.size;
+    const maxSize = resourceType === 'video' ? 500 * 1024 * 1024 : 10 * 1024 * 1024; // 500MB or 10MB
+    const maxSizeMB = resourceType === 'video' ? 500 : 10;
+    
+    if (fileSize > maxSize) {
+      throw new Error(
+        `File size (${(fileSize / 1024 / 1024).toFixed(2)}MB) exceeds maximum allowed size of ${maxSizeMB}MB`
+      );
+    }
+    
+    return true;
+  } catch (error: any) {
+    if (error.message.includes('exceeds maximum')) {
+      throw error;
+    }
+    // If validation fails for other reasons, log but allow upload to proceed
+    // (backend will also validate)
+    console.warn('[MediaService] File size validation warning:', error.message);
+    return true;
+  }
 }

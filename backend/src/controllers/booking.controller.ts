@@ -84,6 +84,36 @@ export async function createBooking(req: Request, res: Response, next: NextFunct
 
     const bookingRef = await db.collection('bookings').add(bookingData);
 
+    // Notify provider about new booking request
+    try {
+      await createNotificationForUser({
+        userId: providerId,
+        title: 'New booking request',
+        body: `You have received a new booking request for ${date}${time ? ` at ${time}` : ''}.`,
+        type: 'booking',
+        data: { bookingId: bookingRef.id, status: 'requested' },
+        createdBy: req.user!.userId,
+      });
+    } catch (notifError) {
+      console.error('Failed to notify provider about booking:', notifError);
+      // Don't fail the booking creation if notification fails
+    }
+
+    // Notify booker that request was sent
+    try {
+      await createNotificationForUser({
+        userId: req.user!.userId,
+        title: 'Booking request sent',
+        body: `Your booking request has been sent and is pending approval.`,
+        type: 'booking',
+        data: { bookingId: bookingRef.id, status: 'requested' },
+        createdBy: req.user!.userId,
+      });
+    } catch (notifError) {
+      console.error('Failed to notify booker:', notifError);
+      // Don't fail the booking creation if notification fails
+    }
+
     sendSuccess(
       res,
       {

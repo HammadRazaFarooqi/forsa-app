@@ -9,7 +9,7 @@ import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
 import { auth, db } from '../lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { uploadImageToS3 } from '../lib/awsS3Helpers';
+import { uploadImageToStorage } from '../lib/firebaseHelpers';
 
 const cities = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>).map(([key, label]) => ({ key, label }));
 
@@ -113,9 +113,9 @@ export default function AgentEditProfileScreen() {
 
       let profilePhotoUrl = profilePhoto;
 
-      // If the photo is a local URI (not a URL), upload it to S3
+      // If the photo is a local URI (not a URL), upload it to Firebase Storage
       if (profilePhoto && !profilePhoto.startsWith('http')) {
-        profilePhotoUrl = await uploadImageToS3(
+        profilePhotoUrl = await uploadImageToStorage(
           profilePhoto,
           `users/${user.uid}/profile.jpg`
         );

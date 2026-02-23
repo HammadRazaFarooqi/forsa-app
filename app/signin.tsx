@@ -79,18 +79,100 @@ const SignInScreen = () => {
       authEmail = email;
 
       // If phone number, normalize the same way as signup so auth email matches
-      // (Firestore users collection is not readable when unauthenticated, so we rely on normalization only)
       if (!isEmail) {
         const normalizedPhone = normalizePhoneForAuth(emailOrPhone);
         authEmail = `user_${normalizedPhone}@forsa.app`;
+      } else {
+        // User entered an email - try direct authentication first (for admin accounts)
+        // If that fails, then try phone lookup (for regular users with user_{phone}@forsa.app format)
+        authEmail = email.trim().toLowerCase();
       }
 
       // Sign in with Firebase Auth
-      const userCredential = await signInWithEmailAndPassword(
-        auth,
-        authEmail,
-        password
-      );
+      let userCredential: any = null;
+      let authError: any = null;
+      
+      try {
+        // First attempt: Try direct email authentication (for admin accounts)
+        userCredential = await signInWithEmailAndPassword(
+          auth,
+          authEmail,
+          password
+        );
+      } catch (error: any) {
+        authError = error;
+        // If direct email authentication failed and it's an email input,
+        // try looking up phone number from Firestore (for regular users)
+        if (isEmail && (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password')) {
+          try {
+            const { collection, query, where, getDocs, limit } = await import('firebase/firestore');
+            const usersRef = collection(db, 'users');
+            const emailQuery = query(
+              usersRef, 
+              where('email', '==', email.trim().toLowerCase()),
+              limit(1)
+            );
+            const emailSnapshot = await getDocs(emailQuery);
+            
+            if (!emailSnapshot.empty) {
+              // Found user by email - get their phone number
+              const userDoc = emailSnapshot.docs[0];
+              const userData = userDoc.data();
+              const phone = userData.phone;
+              
+              if (phone) {
+                // Construct the Firebase Auth email using their phone
+                const normalizedPhone = normalizePhoneForAuth(phone);
+                authEmail = `user_${normalizedPhone}@forsa.app`;
+                
+                // Try authentication again with phone-based email
+                try {
+                  userCredential = await signInWithEmailAndPassword(
+                    auth,
+                    authEmail,
+                    password
+                  );
+                  authError = null; // Success - clear error
+                } catch (retryError: any) {
+                  authError = retryError; // Keep the error for final handling
+                }
+              } else {
+                // Phone not found - user exists but can't authenticate
+                throw new Error('User account found but phone number is missing. Please contact support.');
+              }
+            } else {
+              // Email not found in Firestore - keep original auth error
+              throw error;
+            }
+          } catch (firestoreError: any) {
+            // If Firestore query fails or user not found, use original auth error
+            if (firestoreError.message && firestoreError.message.includes('phone number is missing')) {
+              throw firestoreError;
+            }
+            // Re-throw original authentication error
+            throw error;
+          }
+        } else {
+          // Not an email or different error - re-throw
+          throw error;
+        }
+      }
+      
+      // If we still have an error after all attempts, handle it
+      if (authError || !userCredential) {
+        // Provide more helpful error messages
+        if (authError && (authError.code === 'auth/invalid-credential' || authError.code === 'auth/wrong-password' || authError.code === 'auth/user-not-found')) {
+          if (isEmail) {
+            throw new Error('Invalid credentials. Please check your email and password, or try logging in with your phone number.');
+          }
+          throw new Error('Invalid credentials. Please check your phone number and password.');
+        }
+        if (authError) {
+          throw authError;
+        }
+        throw new Error('Authentication failed. Please try again.');
+      }
+      
       const user = userCredential.user;
 
       // Get user role from Firestore
