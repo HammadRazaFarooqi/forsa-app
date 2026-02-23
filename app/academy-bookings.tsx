@@ -1,74 +1,138 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useRef, useState } from 'react';
-import { Animated, Easing, FlatList, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useRef, useState, useEffect } from 'react';
+import { Animated, Easing, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Alert, RefreshControl } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
+import { db, auth } from '../lib/firebase';
+import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 
-// Mock bookings data (UI only - replace with actual data from Firestore)
-const mockBookings = [
-  {
-    id: '1',
-    playerName: 'Ahmed Hassan',
-    playerAge: 15,
-    program: 'Football Training',
-    date: '2024-01-15',
-    time: '4:00 PM',
-    status: 'confirmed',
-    price: 500,
-  },
-  {
-    id: '2',
-    playerName: 'Mohamed Ali',
-    playerAge: 12,
-    program: 'Basketball Training',
-    date: '2024-01-20',
-    time: '5:00 PM',
-    status: 'pending',
-    price: 400,
-  },
-  {
-    id: '3',
-    playerName: 'Omar Ibrahim',
-    playerAge: 14,
-    program: 'Football Training',
-    date: '2024-01-18',
-    time: '3:00 PM',
-    status: 'confirmed',
-    price: 500,
-  },
-  {
-    id: '4',
-    playerName: 'Youssef Mahmoud',
-    playerAge: 13,
-    program: 'Football Training',
-    date: '2024-01-22',
-    time: '4:30 PM',
-    status: 'cancelled',
-    price: 500,
-  },
-];
+type BookingItem = {
+  id: string;
+  type: 'academy' | 'clinic';
+  status: string;
+  createdAt?: string;
+  playerName?: string;
+  playerAge?: string;
+  ageGroup?: string;
+  program?: string;
+  date?: string;
+  time?: string;
+  price?: number;
+  providerName?: string;
+  doctor?: string;
+  service?: string;
+  customerName?: string;
+};
 
 export default function AcademyBookingsScreen() {
   const { openMenu } = useHamburgerMenu();
   const [filter, setFilter] = useState<'all' | 'confirmed' | 'pending' | 'cancelled'>('all');
   const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [bookings, setBookings] = useState<BookingItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  React.useEffect(() => {
+  const fetchBookings = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      setBookings([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    try {
+      const all: BookingItem[] = [];
+
+      // 1) Academy as provider: bookings made by players/parents to this academy
+      try {
+        const qProvider = query(
+          collection(db, 'bookings'),
+          where('providerId', '==', user.uid),
+          where('type', '==', 'academy')
+        );
+        const snapProvider = await getDocs(qProvider);
+        snapProvider.forEach((docSnap) => {
+          const d = docSnap.data();
+          all.push({
+            id: docSnap.id,
+            type: 'academy',
+            status: d.status || 'pending',
+            createdAt: d.createdAt,
+            playerName: d.playerName || d.customerName,
+            playerAge: d.ageGroup || d.playerAge,
+            program: d.program,
+            date: d.date,
+            time: d.time,
+            price: d.price,
+            providerName: d.providerName,
+          });
+        });
+      } catch (err) {
+        console.warn('Academy provider bookings fetch error:', err);
+      }
+
+      // 2) Academy as customer: clinic bookings made by this academy
+      try {
+        const qClinic = query(
+          collection(db, 'bookings'),
+          where('academyId', '==', user.uid),
+          where('type', '==', 'clinic')
+        );
+        const snapClinic = await getDocs(qClinic);
+        snapClinic.forEach((docSnap) => {
+          const d = docSnap.data();
+          all.push({
+            id: docSnap.id,
+            type: 'clinic',
+            status: d.status || 'pending',
+            createdAt: d.createdAt,
+            providerName: d.providerName || d.name,
+            doctor: d.doctor,
+            service: d.service,
+            date: d.date,
+            price: d.price,
+            customerName: d.customerName,
+          });
+        });
+      } catch (err) {
+        console.warn('Academy clinic bookings fetch error:', err);
+      }
+
+      all.sort((a, b) => {
+        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return tB - tA;
+      });
+
+      setBookings(all);
+    } catch (error) {
+      console.error('Error fetching academy bookings:', error);
+      Alert.alert(i18n.t('error'), 'Failed to load bookings');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 600,
       easing: Easing.out(Easing.exp),
       useNativeDriver: true,
     }).start();
+
+    fetchBookings();
   }, []);
 
-  const filteredBookings = filter === 'all' 
-    ? mockBookings 
-    : mockBookings.filter(b => b.status === filter);
+  const filteredBookings = filter === 'all'
+    ? bookings
+    : bookings.filter(b => b.status === filter);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -104,7 +168,6 @@ export default function AcademyBookingsScreen() {
       >
         <HamburgerMenu />
         <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
-          {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.menuButton} onPress={openMenu}>
               <Ionicons name="menu" size={24} color="#fff" />
@@ -115,7 +178,6 @@ export default function AcademyBookingsScreen() {
             </View>
           </View>
 
-          {/* Filter Buttons */}
           <View style={styles.filterContainer}>
             <TouchableOpacity
               style={[styles.filterButton, filter === 'all' && styles.filterButtonActive]}
@@ -154,56 +216,78 @@ export default function AcademyBookingsScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Bookings List */}
-          <ScrollView 
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {filteredBookings.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <Ionicons name="calendar-outline" size={64} color="rgba(255, 255, 255, 0.3)" />
-                <Text style={styles.emptyText}>{i18n.t('noBookings') || 'No bookings found'}</Text>
-                <Text style={styles.emptySubtext}>{i18n.t('bookingsWillAppear') || 'Player bookings will appear here'}</Text>
-              </View>
-            ) : (
-              filteredBookings.map((booking) => (
-                <View key={booking.id} style={styles.bookingCard}>
-                  <View style={styles.bookingHeader}>
-                    <View style={styles.playerInfoContainer}>
-                      <Ionicons name="person-circle" size={32} color="#fff" />
-                      <View style={styles.playerDetails}>
-                        <Text style={styles.playerName}>{booking.playerName}</Text>
-                        <Text style={styles.playerAge}>{i18n.t('age') || 'Age'}: {booking.playerAge}</Text>
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#fff" />
+            </View>
+          ) : (
+            <ScrollView
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchBookings(); }} tint="#fff" />
+              }
+            >
+              {filteredBookings.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="calendar-outline" size={64} color="rgba(255, 255, 255, 0.3)" />
+                  <Text style={styles.emptyText}>{i18n.t('noBookings') || 'No bookings found'}</Text>
+                  <Text style={styles.emptySubtext}>{i18n.t('bookingsWillAppear') || 'Player bookings and your clinic reservations will appear here'}</Text>
+                </View>
+              ) : (
+                filteredBookings.map((booking) => (
+                  <View key={booking.id} style={styles.bookingCard}>
+                    <View style={styles.bookingHeader}>
+                      <View style={styles.playerInfoContainer}>
+                        <Ionicons name={booking.type === 'clinic' ? 'medical' : 'person-circle'} size={32} color="#fff" />
+                        <View style={styles.playerDetails}>
+                          <Text style={styles.playerName}>
+                            {booking.type === 'academy'
+                              ? (booking.playerName || '—')
+                              : (booking.providerName || booking.service || 'Clinic')}
+                          </Text>
+                          <View style={styles.typeBadge}>
+                            <Text style={styles.typeBadgeText}>
+                              {booking.type === 'academy' ? (i18n.t('academy') || 'Academy') : (i18n.t('clinic') || 'Clinic')}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                      <View style={[styles.statusBadge, { backgroundColor: getStatusColor(booking.status) }]}>
+                        <Text style={styles.statusText}>{getStatusText(booking.status)}</Text>
                       </View>
                     </View>
-                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(booking.status) }]}>
-                      <Text style={styles.statusText}>{getStatusText(booking.status)}</Text>
-                    </View>
-                  </View>
 
-                  <View style={styles.bookingDetails}>
-                    <View style={styles.detailRow}>
-                      <Ionicons name="football" size={18} color="rgba(255,255,255,0.7)" />
-                      <Text style={styles.detailText}>{booking.program}</Text>
+                    <View style={styles.bookingDetails}>
+                      {booking.type === 'academy' && booking.program && (
+                        <View style={styles.detailRow}>
+                          <Ionicons name="football" size={18} color="rgba(255,255,255,0.7)" />
+                          <Text style={styles.detailText}>{booking.program}</Text>
+                        </View>
+                      )}
+                      {booking.type === 'clinic' && (booking.service || booking.doctor) && (
+                        <View style={styles.detailRow}>
+                          <Ionicons name="medical" size={18} color="rgba(255,255,255,0.7)" />
+                          <Text style={styles.detailText}>{[booking.service, booking.doctor].filter(Boolean).join(' · ')}</Text>
+                        </View>
+                      )}
+                      {booking.date && (
+                        <View style={styles.detailRow}>
+                          <Ionicons name="calendar" size={18} color="rgba(255,255,255,0.7)" />
+                          <Text style={styles.detailText}>{booking.date}</Text>
+                        </View>
+                      )}
                     </View>
-                    <View style={styles.detailRow}>
-                      <Ionicons name="calendar" size={18} color="rgba(255,255,255,0.7)" />
-                      <Text style={styles.detailText}>{booking.date}</Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                      <Ionicons name="time" size={18} color="rgba(255,255,255,0.7)" />
-                      <Text style={styles.detailText}>{booking.time}</Text>
-                    </View>
-                  </View>
 
-                  <View style={styles.bookingFooter}>
-                    <Text style={styles.priceLabel}>{i18n.t('total') || 'Total'}</Text>
-                    <Text style={styles.priceValue}>{booking.price} EGP</Text>
+                    <View style={styles.bookingFooter}>
+                      <Text style={styles.priceLabel}>{i18n.t('total') || 'Total'}</Text>
+                      <Text style={styles.priceValue}>{booking.price != null ? `${booking.price} EGP` : '—'}</Text>
+                    </View>
                   </View>
-                </View>
-              ))
-            )}
-          </ScrollView>
+                ))
+              )}
+            </ScrollView>
+          )}
         </Animated.View>
       </LinearGradient>
     </KeyboardAvoidingView>
@@ -211,12 +295,8 @@ export default function AcademyBookingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
+  container: { flex: 1 },
+  gradient: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -270,21 +350,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     gap: 6,
   },
-  filterButtonActive: {
-    backgroundColor: '#fff',
-  },
-  filterButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-  },
-  filterButtonTextActive: {
-    color: '#000',
-  },
-  scrollContent: {
-    paddingHorizontal: 24,
-    paddingBottom: 40,
-  },
+  filterButtonActive: { backgroundColor: '#fff' },
+  filterButtonText: { fontSize: 14, fontWeight: '600', color: '#666' },
+  filterButtonTextActive: { color: '#000' },
+  scrollContent: { paddingHorizontal: 24, paddingBottom: 40 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 40 },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -323,42 +393,30 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 12,
   },
-  playerDetails: {
-    flex: 1,
-  },
+  playerDetails: { flex: 1 },
   playerName: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
     marginBottom: 4,
   },
-  playerAge: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
+  typeBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
   },
+  typeBadgeText: { fontSize: 12, color: 'rgba(255,255,255,0.9)' },
   statusBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
   },
-  statusText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  bookingDetails: {
-    gap: 12,
-    marginBottom: 16,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  detailText: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
+  statusText: { fontSize: 12, fontWeight: 'bold', color: '#fff' },
+  bookingDetails: { gap: 12, marginBottom: 16 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  detailText: { fontSize: 16, color: 'rgba(255, 255, 255, 0.8)' },
   bookingFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -367,14 +425,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
-  priceLabel: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.7)',
-  },
-  priceValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
+  priceLabel: { fontSize: 16, color: 'rgba(255, 255, 255, 0.7)' },
+  priceValue: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
 });
-

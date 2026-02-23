@@ -19,6 +19,7 @@ const AcademyHamburgerMenu: React.FC<AcademyHamburgerMenuProps> = ({ visible, on
     { label: i18n.t('academyFeed') || 'Academy Feed', route: '/academy-feed' },
     { label: i18n.t('academyEditProfile') || 'Edit Profile', route: '/academy-edit-profile' },
     { label: i18n.t('academyUploadMedia') || 'Upload Media', route: '/academy-upload-media' },
+    { label: i18n.t('searchClinics') || 'Search Clinics', route: '/academy-search-clinics' },
     { label: i18n.t('myBookings') || 'My Bookings', route: '/academy-bookings' },
     { label: i18n.t('signOut') || 'Sign Out', route: '/signout' },
   ];

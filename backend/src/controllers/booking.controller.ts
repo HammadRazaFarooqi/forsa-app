@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { db } from '../config/firebase';
 import { sendSuccess, sendError } from '../utils/response.util';
+import { createNotificationForUser } from '../utils/notification.util';
 import { BookingStatus, BookingType } from '../types';
 import { z } from 'zod';
 
@@ -226,6 +227,25 @@ export async function updateBookingStatus(req: Request, res: Response, next: Nex
       updatedAt: new Date(),
     });
 
+    // Notify the booker about status change
+    const bookerId = bookingData?.userId as string;
+    const statusMessages: Record<string, { title: string; body: string }> = {
+      [BookingStatus.ACCEPTED]: { title: 'Booking accepted', body: 'Your booking request has been accepted.' },
+      [BookingStatus.REJECTED]: { title: 'Booking rejected', body: 'Your booking request was declined.' },
+      [BookingStatus.COMPLETED]: { title: 'Booking completed', body: 'Your booking has been marked as completed.' },
+    };
+    const msg = statusMessages[status];
+    if (bookerId && msg) {
+      createNotificationForUser({
+        userId: bookerId,
+        title: msg.title,
+        body: msg.body,
+        type: 'booking',
+        data: { bookingId: id, status },
+        createdBy: req.user!.userId,
+      }).catch((err) => console.error('Booking status notification failed:', err));
+    }
+
     const updatedDoc = await db.collection('bookings').doc(id).get();
 
     sendSuccess(
@@ -291,6 +311,21 @@ export async function cancelBooking(req: Request, res: Response, next: NextFunct
       status: BookingStatus.CANCELLED,
       updatedAt: new Date(),
     });
+
+    // Notify the other party about cancellation (booker or provider)
+    const bookerId = bookingData?.userId as string;
+    const providerId = bookingData?.providerId as string;
+    const notifyUserId = req.user!.userId === bookerId ? providerId : bookerId;
+    if (notifyUserId) {
+      createNotificationForUser({
+        userId: notifyUserId,
+        title: 'Booking cancelled',
+        body: 'A booking has been cancelled.',
+        type: 'booking',
+        data: { bookingId: id, status: 'cancelled' },
+        createdBy: req.user!.userId,
+      }).catch((err) => console.error('Booking cancel notification failed:', err));
+    }
 
     const updatedDoc = await db.collection('bookings').doc(id).get();
 

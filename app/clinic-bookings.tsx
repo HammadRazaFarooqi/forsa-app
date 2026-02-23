@@ -1,78 +1,99 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useRef, useState } from 'react';
-import { Animated, Easing, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useRef, useState, useEffect } from 'react';
+import { Animated, Easing, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Alert, RefreshControl } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
+import { db, auth } from '../lib/firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
-// Mock bookings data (UI only - replace with actual data from Firestore)
-const mockBookings = [
-  {
-    id: '1',
-    patientName: 'Ahmed Hassan',
-    patientAge: 25,
-    service: 'Physiotherapy',
-    doctor: 'Dr. Mona Youssef',
-    date: '2024-01-15',
-    time: '10:00 AM',
-    status: 'confirmed',
-    price: 300,
-  },
-  {
-    id: '2',
-    patientName: 'Mohamed Ali',
-    patientAge: 30,
-    service: 'Sports Medicine',
-    doctor: 'Dr. Ahmed Hassan',
-    date: '2024-01-20',
-    time: '2:00 PM',
-    status: 'pending',
-    price: 350,
-  },
-  {
-    id: '3',
-    patientName: 'Omar Ibrahim',
-    patientAge: 22,
-    service: 'Physiotherapy',
-    doctor: 'Dr. Mona Youssef',
-    date: '2024-01-18',
-    time: '11:00 AM',
-    status: 'confirmed',
-    price: 300,
-  },
-  {
-    id: '4',
-    patientName: 'Youssef Mahmoud',
-    patientAge: 28,
-    service: 'Sports Medicine',
-    doctor: 'Dr. Ahmed Hassan',
-    date: '2024-01-22',
-    time: '3:00 PM',
-    status: 'cancelled',
-    price: 350,
-  },
-];
+type BookingItem = {
+  id: string;
+  patientName?: string;
+  customerName?: string;
+  service?: string;
+  doctor?: string;
+  date?: string;
+  time?: string;
+  status: string;
+  price?: number;
+  createdAt?: string;
+};
 
 export default function ClinicBookingsScreen() {
   const { openMenu } = useHamburgerMenu();
   const [filter, setFilter] = useState<'all' | 'confirmed' | 'pending' | 'cancelled'>('all');
   const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [bookings, setBookings] = useState<BookingItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  React.useEffect(() => {
+  const fetchBookings = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      setBookings([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    try {
+      const q = query(
+        collection(db, 'bookings'),
+        where('providerId', '==', user.uid),
+        where('type', '==', 'clinic')
+      );
+      const snapshot = await getDocs(q);
+      const list: BookingItem[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          patientName: d.playerName,
+          customerName: d.customerName,
+          service: d.service,
+          doctor: d.doctor,
+          date: d.date,
+          time: d.time,
+          status: d.status || 'pending',
+          price: d.price,
+          createdAt: d.createdAt,
+        });
+      });
+
+      list.sort((a, b) => {
+        const tA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return tB - tA;
+      });
+
+      setBookings(list);
+    } catch (error) {
+      console.error('Error fetching clinic bookings:', error);
+      Alert.alert(i18n.t('error'), 'Failed to load bookings');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 600,
       easing: Easing.out(Easing.exp),
       useNativeDriver: true,
     }).start();
+
+    fetchBookings();
   }, []);
 
-  const filteredBookings = filter === 'all' 
-    ? mockBookings 
-    : mockBookings.filter(b => b.status === filter);
+  const filteredBookings = filter === 'all'
+    ? bookings
+    : bookings.filter(b => b.status === filter);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -100,6 +121,8 @@ export default function ClinicBookingsScreen() {
     }
   };
 
+  const displayName = (b: BookingItem) => b.patientName || b.customerName || '—';
+
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <LinearGradient
@@ -108,7 +131,6 @@ export default function ClinicBookingsScreen() {
       >
         <HamburgerMenu />
         <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
-          {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.menuButton} onPress={openMenu}>
               <Ionicons name="menu" size={24} color="#fff" />
@@ -119,7 +141,6 @@ export default function ClinicBookingsScreen() {
             </View>
           </View>
 
-          {/* Filter Buttons */}
           <View style={styles.filterContainer}>
             <TouchableOpacity
               style={[styles.filterButton, filter === 'all' && styles.filterButtonActive]}
@@ -158,60 +179,69 @@ export default function ClinicBookingsScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Bookings List */}
-          <ScrollView 
-            contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {filteredBookings.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <Ionicons name="calendar-outline" size={64} color="rgba(255, 255, 255, 0.3)" />
-                <Text style={styles.emptyText}>{i18n.t('noBookings') || 'No bookings found'}</Text>
-                <Text style={styles.emptySubtext}>{i18n.t('appointmentsWillAppear') || 'Patient appointments will appear here'}</Text>
-              </View>
-            ) : (
-              filteredBookings.map((booking) => (
-                <View key={booking.id} style={styles.bookingCard}>
-                  <View style={styles.bookingHeader}>
-                    <View style={styles.patientInfoContainer}>
-                      <Ionicons name="person-circle" size={32} color="#fff" />
-                      <View style={styles.patientDetails}>
-                        <Text style={styles.patientName}>{booking.patientName}</Text>
-                        <Text style={styles.patientAge}>{i18n.t('age') || 'Age'}: {booking.patientAge}</Text>
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#fff" />
+            </View>
+          ) : (
+            <ScrollView
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchBookings(); }} tint="#fff" />
+              }
+            >
+              {filteredBookings.length === 0 ? (
+                <View style={styles.emptyContainer}>
+                  <Ionicons name="calendar-outline" size={64} color="rgba(255, 255, 255, 0.3)" />
+                  <Text style={styles.emptyText}>{i18n.t('noBookings') || 'No bookings found'}</Text>
+                  <Text style={styles.emptySubtext}>{i18n.t('appointmentsWillAppear') || 'Patient appointments will appear here'}</Text>
+                </View>
+              ) : (
+                filteredBookings.map((booking) => (
+                  <View key={booking.id} style={styles.bookingCard}>
+                    <View style={styles.bookingHeader}>
+                      <View style={styles.patientInfoContainer}>
+                        <Ionicons name="person-circle" size={32} color="#fff" />
+                        <View style={styles.patientDetails}>
+                          <Text style={styles.patientName}>{displayName(booking)}</Text>
+                        </View>
+                      </View>
+                      <View style={[styles.statusBadge, { backgroundColor: getStatusColor(booking.status) }]}>
+                        <Text style={styles.statusText}>{getStatusText(booking.status)}</Text>
                       </View>
                     </View>
-                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(booking.status) }]}>
-                      <Text style={styles.statusText}>{getStatusText(booking.status)}</Text>
-                    </View>
-                  </View>
 
-                  <View style={styles.bookingDetails}>
-                    <View style={styles.detailRow}>
-                      <Ionicons name="medical" size={18} color="rgba(255,255,255,0.7)" />
-                      <Text style={styles.detailText}>{booking.service}</Text>
+                    <View style={styles.bookingDetails}>
+                      {(booking.service || booking.doctor) && (
+                        <View style={styles.detailRow}>
+                          <Ionicons name="medical" size={18} color="rgba(255,255,255,0.7)" />
+                          <Text style={styles.detailText}>{[booking.service, booking.doctor].filter(Boolean).join(' · ')}</Text>
+                        </View>
+                      )}
+                      {booking.date && (
+                        <View style={styles.detailRow}>
+                          <Ionicons name="calendar" size={18} color="rgba(255,255,255,0.7)" />
+                          <Text style={styles.detailText}>{booking.date}</Text>
+                        </View>
+                      )}
+                      {booking.time && (
+                        <View style={styles.detailRow}>
+                          <Ionicons name="time" size={18} color="rgba(255,255,255,0.7)" />
+                          <Text style={styles.detailText}>{booking.time}</Text>
+                        </View>
+                      )}
                     </View>
-                    <View style={styles.detailRow}>
-                      <Ionicons name="person" size={18} color="rgba(255,255,255,0.7)" />
-                      <Text style={styles.detailText}>{booking.doctor}</Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                      <Ionicons name="calendar" size={18} color="rgba(255,255,255,0.7)" />
-                      <Text style={styles.detailText}>{booking.date}</Text>
-                    </View>
-                    <View style={styles.detailRow}>
-                      <Ionicons name="time" size={18} color="rgba(255,255,255,0.7)" />
-                      <Text style={styles.detailText}>{booking.time}</Text>
-                    </View>
-                  </View>
 
-                  <View style={styles.bookingFooter}>
-                    <Text style={styles.priceLabel}>{i18n.t('fee') || 'Fee'}</Text>
-                    <Text style={styles.priceValue}>{booking.price} EGP</Text>
+                    <View style={styles.bookingFooter}>
+                      <Text style={styles.priceLabel}>{i18n.t('fee') || 'Fee'}</Text>
+                      <Text style={styles.priceValue}>{booking.price != null ? `${booking.price} EGP` : '—'}</Text>
+                    </View>
                   </View>
-                </View>
-              ))
-            )}
-          </ScrollView>
+                ))
+              )}
+            </ScrollView>
+          )}
         </Animated.View>
       </LinearGradient>
     </KeyboardAvoidingView>
@@ -219,12 +249,8 @@ export default function ClinicBookingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
+  container: { flex: 1 },
+  gradient: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -278,21 +304,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     gap: 6,
   },
-  filterButtonActive: {
-    backgroundColor: '#fff',
-  },
-  filterButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-  },
-  filterButtonTextActive: {
-    color: '#000',
-  },
-  scrollContent: {
-    paddingHorizontal: 24,
-    paddingBottom: 40,
-  },
+  filterButtonActive: { backgroundColor: '#fff' },
+  filterButtonText: { fontSize: 14, fontWeight: '600', color: '#666' },
+  filterButtonTextActive: { color: '#000' },
+  scrollContent: { paddingHorizontal: 24, paddingBottom: 40 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 40 },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -331,42 +347,22 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 12,
   },
-  patientDetails: {
-    flex: 1,
-  },
+  patientDetails: { flex: 1 },
   patientName: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#fff',
     marginBottom: 4,
   },
-  patientAge: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
-  },
   statusBadge: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
   },
-  statusText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  bookingDetails: {
-    gap: 12,
-    marginBottom: 16,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  detailText: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
+  statusText: { fontSize: 12, fontWeight: 'bold', color: '#fff' },
+  bookingDetails: { gap: 12, marginBottom: 16 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  detailText: { fontSize: 16, color: 'rgba(255, 255, 255, 0.8)' },
   bookingFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -375,14 +371,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
-  priceLabel: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.7)',
-  },
-  priceValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
+  priceLabel: { fontSize: 16, color: 'rgba(255, 255, 255, 0.7)' },
+  priceValue: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
 });
-

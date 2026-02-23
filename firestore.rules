@@ -130,11 +130,12 @@ service cloud.firestore {
       allow delete: if false;
     }
     
-    // Notifications
+    // Notifications (in-app: each user sees their own; create only with createdBy = caller)
     match /notifications/{notificationId} {
       allow read: if isAuthenticated() && 
                      resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+                       request.resource.data.createdBy == request.auth.uid;
       allow update: if isOwner(resource.data.userId);
       allow delete: if false;
     }
@@ -171,7 +172,7 @@ service cloud.firestore {
                        // Check if user is suspended
                        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isSuspended != true;
       
-      // Update: Owner can update (but not change ownerId/ownerRole), OR admin can set status to 'deleted'
+      // Update: Owner can update (content, or soft-delete), OR admin can set status to 'deleted'
       allow update: if isAuthenticated() && (
                        // Owner can update (but not change ownerId or ownerRole)
                        (resource.data.ownerId == request.auth.uid &&

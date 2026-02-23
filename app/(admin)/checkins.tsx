@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { subscribeAdminCheckIns, CheckIn, CheckInFilters } from '../../services/CheckInService';
 import { isAdmin } from '../../services/ModerationService';
+import { formatTimestamp } from '../../lib/dateUtils';
 
 export default function AdminCheckInsScreen() {
     const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
@@ -49,38 +50,8 @@ export default function AdminCheckInsScreen() {
         }
     };
 
-    const formatDate = (timestamp: any) => {
-        if (!timestamp) return 'Unknown';
-        
-        try {
-            let date: Date;
-            
-            if (timestamp && typeof timestamp.toDate === 'function') {
-                date = timestamp.toDate();
-            } else if (timestamp?.seconds !== undefined) {
-                date = new Date(timestamp.seconds * 1000);
-            } else if (timestamp instanceof Date) {
-                date = timestamp;
-            } else {
-                date = new Date(timestamp);
-            }
-            
-            if (isNaN(date.getTime())) {
-                return 'Invalid date';
-            }
-            
-            // Format as DD/MM/YY HH:MM
-            const day = date.getDate().toString().padStart(2, '0');
-            const month = (date.getMonth() + 1).toString().padStart(2, '0');
-            const year = date.getFullYear().toString().slice(-2);
-            const hours = date.getHours().toString().padStart(2, '0');
-            const minutes = date.getMinutes().toString().padStart(2, '0');
-            
-            return `${day}/${month}/${year} ${hours}:${minutes}`;
-        } catch (error) {
-            return 'Invalid date';
-        }
-    };
+    const formatDate = (timestamp: unknown) =>
+        formatTimestamp(timestamp, { withTime: true, fallback: 'Unknown' });
 
     const renderItem = ({ item }: { item: CheckIn }) => (
         <View style={styles.card}>

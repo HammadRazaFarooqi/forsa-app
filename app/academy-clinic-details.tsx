@@ -8,11 +8,12 @@ import { auth, db } from '../lib/firebase';
 import { doc, getDoc, collection, addDoc } from 'firebase/firestore';
 import { notifyProviderAndAdmins, createNotification } from '../services/NotificationService';
 
-export default function ParentClinicDetailsScreen() {
+export default function AcademyClinicDetailsScreen() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const [clinic, setClinic] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [bookingLoading, setBookingLoading] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -37,7 +38,6 @@ export default function ParentClinicDetailsScreen() {
       if (docSnap.exists()) {
         const data = docSnap.data();
 
-        // Transform services data
         const servicesList: any[] = [];
         if (data.services) {
           Object.entries(data.services).forEach(([key, val]: [string, any]) => {
@@ -50,7 +50,6 @@ export default function ParentClinicDetailsScreen() {
           });
         }
 
-        // Transform working hours
         const workingHoursList: any[] = [];
         if (data.workingHours) {
           const daysOrder = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
@@ -79,8 +78,6 @@ export default function ParentClinicDetailsScreen() {
           workingHours: workingHoursList,
           doctors: data.doctors ? data.doctors.map((d: any) => d.name) : []
         });
-      } else {
-        console.log('No such document!');
       }
     } catch (error) {
       console.error('Error fetching clinic details:', error);
@@ -89,7 +86,7 @@ export default function ParentClinicDetailsScreen() {
     }
   };
 
-  if (loading) {
+  if (loading && !clinic) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#fff" />
@@ -129,52 +126,73 @@ export default function ParentClinicDetailsScreen() {
     }
 
     try {
-      setLoading(true);
+      setBookingLoading(true);
+
+      let academyName = user.displayName || 'Academy';
+      try {
+        const userDoc = await getDoc(doc(db, 'users', user.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          academyName = userData.academyName || userData.name || academyName;
+        }
+      } catch (err) {
+        console.log('Error fetching academy name, using default');
+      }
+
+      const firstService = clinic.services && clinic.services[0];
+      const serviceName = firstService ? firstService.name : 'General';
+      const servicePrice = firstService ? Number(firstService.fee) || 0 : 0;
+
       const bookingData = {
-        parentId: user.uid,
+        academyId: user.uid,
+        customerName: academyName,
         providerId: clinic.id,
+        providerName: clinic.name,
         type: 'clinic',
         status: 'pending',
-        date: new Date().toISOString().split('T')[0], // Default to today for now, or maybe needs a picker?
+        date: new Date().toISOString().split('T')[0],
         createdAt: new Date().toISOString(),
         name: clinic.name,
         city: clinic.city,
         doctor: doctor,
-        price: 0, // Clinic price varies by service, maybe we can't capture it here easily without service selection
+        service: serviceName,
+        price: servicePrice,
       };
 
       const bookingRef = await addDoc(collection(db, 'bookings'), bookingData);
-      const providerId = clinic.id;
+      const providerId = clinic?.id;
       try {
-        await notifyProviderAndAdmins(
-          providerId,
-          i18n.t('newBookingRequest') || 'New booking request',
-          `${i18n.t('parent') || 'Parent'} ${i18n.t('requestedBooking') || 'requested a booking'}: ${doctor}`,
-          'booking',
-          { bookingId: bookingRef.id },
-          user.uid
-        );
+        if (providerId) {
+          await notifyProviderAndAdmins(
+            providerId,
+            i18n.t('newBookingRequest') || 'New booking request',
+            `${customerName} ${i18n.t('requestedBooking') || 'requested a booking'}: ${serviceName}`,
+            'booking',
+            { bookingId: bookingRef.id },
+            user.uid
+          );
+        }
         await createNotification({
           userId: user.uid,
           title: i18n.t('bookingRequestSent') || 'Booking request sent',
-          body: `${clinic.name} – ${doctor}`,
+          body: `${clinic?.name || 'Clinic'} – ${doctor}, ${serviceName}`,
           type: 'booking',
           data: { bookingId: bookingRef.id },
         });
       } catch (e) {
-        console.warn('Notification create failed:', e);
+        console.warn('Academy→clinic notification failed:', e);
       }
 
       Alert.alert(
-        i18n.t('success') || 'Success',
-        `${i18n.t('reservationSuccess') || 'Reservation request sent!'}\n${i18n.t('doctor')}: ${doctor}`,
-        [{ text: 'OK', onPress: () => router.push('/parent-bookings') }] // successful booking takes you to My Bookings? Or just OK.
+        i18n.t('reservation') || 'Reservation',
+        `${i18n.t('reservationSuccess') || 'Reservation request sent!'}\n${i18n.t('doctor') || 'Doctor'}: ${doctor}\n${i18n.t('service') || 'Service'}: ${serviceName}`,
+        [{ text: i18n.t('ok') || 'OK', onPress: () => router.push('/academy-bookings') }]
       );
     } catch (error) {
-      console.error('Error creating booking:', error);
+      console.error('Error creating clinic booking:', error);
       Alert.alert(i18n.t('error'), i18n.t('bookingFailed') || 'Failed to create booking');
     } finally {
-      setLoading(false);
+      setBookingLoading(false);
     }
   };
 
@@ -185,7 +203,6 @@ export default function ParentClinicDetailsScreen() {
         style={styles.gradient}
       >
         <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
-          {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
               <Ionicons name="arrow-back" size={24} color="#fff" />
@@ -224,7 +241,6 @@ export default function ParentClinicDetailsScreen() {
                 </View>
               </View>
 
-              {/* Services with Individual Pricing */}
               <View style={styles.detailRow}>
                 <View style={styles.detailIcon}>
                   <Ionicons name="cash" size={20} color="#000" />
@@ -297,11 +313,18 @@ export default function ParentClinicDetailsScreen() {
                     key={idx}
                     style={styles.doctorButton}
                     onPress={() => handleReserve(doctor)}
+                    disabled={bookingLoading}
                     activeOpacity={0.8}
                   >
-                    <Ionicons name="person" size={20} color="#000" style={styles.doctorIcon} />
-                    <Text style={styles.doctorName}>{doctor}</Text>
-                    <Ionicons name="calendar" size={20} color="#000" />
+                    {bookingLoading ? (
+                      <ActivityIndicator size="small" color="#000" />
+                    ) : (
+                      <>
+                        <Ionicons name="person" size={20} color="#000" style={styles.doctorIcon} />
+                        <Text style={styles.doctorName}>{doctor}</Text>
+                        <Ionicons name="calendar" size={20} color="#000" />
+                      </>
+                    )}
                   </TouchableOpacity>
                 ))
               ) : (
@@ -316,214 +339,38 @@ export default function ParentClinicDetailsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#1a1a1a',
-  },
-  errorContainer: {
-    flex: 1,
-  },
-  errorContent: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  errorText: {
-    fontSize: 18,
-    color: '#fff',
-    marginTop: 16,
-    marginBottom: 20,
-  },
-  backButtonLarge: {
-    backgroundColor: '#fff',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 24,
-  },
-  backButtonText: {
-    color: '#000',
-    fontWeight: 'bold',
-  },
-  header: {
-    paddingTop: Platform.OS === 'ios' ? 60 : 40,
-    paddingHorizontal: 24,
-    paddingBottom: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  headerContent: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.7)',
-    textAlign: 'center',
-  },
-  callButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 16,
-  },
-  scrollContent: {
-    paddingHorizontal: 24,
-    paddingBottom: 40,
-  },
-  detailsCard: {
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    padding: 24,
-    marginTop: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 20,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  detailIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  detailContent: {
-    flex: 1,
-  },
-  detailLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 4,
-  },
-  detailValue: {
-    fontSize: 16,
-    color: '#000',
-    lineHeight: 22,
-  },
-  hoursCard: {
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    padding: 24,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  doctorsCard: {
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    padding: 24,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  cardTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#000',
-    marginLeft: 12,
-  },
-  hoursRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  hoursDay: {
-    fontSize: 16,
-    color: '#000',
-    fontWeight: '500',
-  },
-  hoursTime: {
-    fontSize: 16,
-    color: '#666',
-  },
-  doctorButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-  },
-  doctorIcon: {
-    marginRight: 12,
-  },
-  doctorName: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000',
-  },
-  serviceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  serviceName: {
-    fontSize: 16,
-    color: '#000',
-    flex: 1,
-  },
-  serviceFee: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#000',
-    marginLeft: 12,
-  },
+  container: { flex: 1 },
+  gradient: { flex: 1 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a1a1a' },
+  errorContainer: { flex: 1 },
+  errorContent: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  errorText: { fontSize: 18, color: '#fff', marginTop: 16, marginBottom: 20 },
+  backButtonLarge: { backgroundColor: '#fff', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 24 },
+  backButtonText: { color: '#000', fontWeight: 'bold' },
+  header: { paddingTop: Platform.OS === 'ios' ? 60 : 40, paddingHorizontal: 24, paddingBottom: 20, flexDirection: 'row', alignItems: 'center' },
+  backButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255, 255, 255, 0.1)', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  headerContent: { flex: 1, alignItems: 'center' },
+  headerTitle: { fontSize: 28, fontWeight: 'bold', color: '#fff', marginBottom: 4, textAlign: 'center' },
+  headerSubtitle: { fontSize: 14, color: 'rgba(255, 255, 255, 0.7)', textAlign: 'center' },
+  callButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255, 255, 255, 0.1)', justifyContent: 'center', alignItems: 'center', marginLeft: 16 },
+  scrollContent: { paddingHorizontal: 24, paddingBottom: 40 },
+  detailsCard: { backgroundColor: '#fff', borderRadius: 24, padding: 24, marginTop: 20, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 10 },
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 20, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  detailIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  detailContent: { flex: 1 },
+  detailLabel: { fontSize: 14, fontWeight: '600', color: '#666', marginBottom: 4 },
+  detailValue: { fontSize: 16, color: '#000', lineHeight: 22 },
+  hoursCard: { backgroundColor: '#fff', borderRadius: 24, padding: 24, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 10 },
+  doctorsCard: { backgroundColor: '#fff', borderRadius: 24, padding: 24, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 10 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
+  cardTitle: { fontSize: 20, fontWeight: 'bold', color: '#000', marginLeft: 12 },
+  hoursRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  hoursDay: { fontSize: 16, color: '#000', fontWeight: '500' },
+  hoursTime: { fontSize: 16, color: '#666' },
+  doctorButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f5f5f5', borderRadius: 12, padding: 16, marginBottom: 12 },
+  doctorIcon: { marginRight: 12 },
+  doctorName: { flex: 1, fontSize: 16, fontWeight: '600', color: '#000' },
+  serviceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  serviceName: { fontSize: 16, color: '#000', flex: 1 },
+  serviceFee: { fontSize: 16, fontWeight: 'bold', color: '#000', marginLeft: 12 },
 });

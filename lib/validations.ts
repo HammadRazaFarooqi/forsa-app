@@ -1,5 +1,17 @@
 // Validation utility functions
 
+/**
+ * Normalize phone for Firebase Auth email generation (generic, any country).
+ * Use the same function for both signup and signin so login with phone works.
+ * - Strips all non-digits only. No country-specific rules (0, +92, etc.).
+ * - Same digit sequence with any formatting (spaces, dashes, +, parentheses) → same account.
+ * - User can sign up and sign in with e.g. "0300 123 4567" or "+92 300 1234567"; as long as
+ *   the digit sequence is the same, the generated email matches.
+ */
+export function normalizePhoneForAuth(phone: string): string {
+  return phone.replace(/\D/g, '');
+}
+
 export const validateEmail = (email: string): string | null => {
   if (!email) {
     return 'Email is required';

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { db } from '../config/firebase';
 import { sendSuccess, sendError } from '../utils/response.util';
+import { createNotificationForUser } from '../utils/notification.util';
 import { AccountStatus } from '../types';
 import { z } from 'zod';
 
@@ -156,6 +157,25 @@ export async function updateUserStatus(req: Request, res: Response, next: NextFu
       } catch (error) {
         console.error('Error revoking tokens:', error);
       }
+      // Notify user that account was suspended/banned
+      createNotificationForUser({
+        userId: id,
+        title: 'Account suspended',
+        body: status === AccountStatus.BANNED ? 'Your account has been banned.' : 'Your account has been suspended. Please contact support.',
+        type: 'system',
+        data: { action: 'suspended', status },
+        createdBy: req.user?.userId,
+      }).catch((err) => console.error('Suspend notification failed:', err));
+    } else if (status === AccountStatus.ACTIVE) {
+      // Notify user that account was reactivated
+      createNotificationForUser({
+        userId: id,
+        title: 'Account reactivated',
+        body: 'Your account has been reactivated. You can sign in again.',
+        type: 'system',
+        data: { action: 'activated', status },
+        createdBy: req.user?.userId,
+      }).catch((err) => console.error('Activate notification failed:', err));
     }
 
     const updatedDoc = await db.collection('users').doc(id).get();

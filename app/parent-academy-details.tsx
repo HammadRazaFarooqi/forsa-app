@@ -6,6 +6,7 @@ import { Alert, Animated, Easing, KeyboardAvoidingView, Modal, Platform, ScrollV
 import i18n from '../locales/i18n';
 import { auth, db } from '../lib/firebase';
 import { doc, getDoc, collection, addDoc } from 'firebase/firestore';
+import { notifyProviderAndAdmins, createNotification } from '../services/NotificationService';
 
 export default function ParentAcademyDetailsScreen() {
   const params = useLocalSearchParams();
@@ -116,7 +117,27 @@ export default function ParentAcademyDetailsScreen() {
         price: Number(price),
       };
 
-      await addDoc(collection(db, 'bookings'), bookingData);
+      const bookingRef = await addDoc(collection(db, 'bookings'), bookingData);
+      const providerId = academy.id;
+      try {
+        await notifyProviderAndAdmins(
+          providerId,
+          i18n.t('newBookingRequest') || 'New booking request',
+          `${i18n.t('parent') || 'Parent'} ${i18n.t('requestedBooking') || 'requested a booking'}`,
+          'booking',
+          { bookingId: bookingRef.id },
+          user.uid
+        );
+        await createNotification({
+          userId: user.uid,
+          title: i18n.t('bookingRequestSent') || 'Booking request sent',
+          body: `${academy.name}`,
+          type: 'booking',
+          data: { bookingId: bookingRef.id },
+        });
+      } catch (e) {
+        console.warn('Notification create failed:', e);
+      }
 
       Alert.alert(
         i18n.t('reservation') || 'Reservation',

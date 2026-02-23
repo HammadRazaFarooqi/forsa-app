@@ -1,3 +1,5 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -7,17 +9,16 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { auth } from '../../lib/firebase';
+import { auth } from '../lib/firebase';
+import i18n from '../locales/i18n';
 import {
   subscribeMyNotifications,
   markAsRead,
   Notification,
   NotificationType,
-} from '../../services/NotificationService';
-import { formatTimestamp } from '../../lib/dateUtils';
-import i18n from '../../locales/i18n';
+} from '../services/NotificationService';
+import { getCurrentUserRole } from '../services/UserRoleService';
+import { formatTimestamp } from '../lib/dateUtils';
 
 const typeToIcon: Record<NotificationType, string> = {
   booking: 'calendar',
@@ -35,7 +36,7 @@ const typeToColor: Record<NotificationType, string> = {
   system: '#8E8E93',
 };
 
-export default function AdminNotificationsScreen() {
+export default function NotificationsScreen() {
   const router = useRouter();
   const [list, setList] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,14 +61,22 @@ export default function AdminNotificationsScreen() {
         console.warn('Mark read failed:', e);
       }
     }
-    if (item.type === 'report' && item.data?.reportId) {
-      router.push('/(admin)/reports');
-    }
+    // Navigate based on notification type and current user role (stay in own profile)
+    const role = await getCurrentUserRole().catch(() => null);
     if (item.type === 'booking' && item.data?.bookingId) {
-      router.push('/(admin)/bookings');
-    }
-    if (item.type === 'checkin') {
-      router.push('/(admin)/checkins');
+      const bookingRoute =
+        role === 'parent' ? '/parent-bookings' :
+        role === 'clinic' ? '/clinic-bookings' :
+        role === 'academy' ? '/academy-bookings' :
+        role === 'agent' ? '/agent-feed' :
+        '/player-bookings';
+      router.push(bookingRoute as any);
+    } else if (item.type === 'checkin' && role === 'clinic') {
+      router.push('/clinic-bookings' as any);
+    } else if (item.type === 'checkin' && role === 'academy') {
+      router.push('/academy-bookings' as any);
+    } else if (item.type === 'report' && role === 'admin') {
+      router.push('/(admin)/reports' as any);
     }
   };
 

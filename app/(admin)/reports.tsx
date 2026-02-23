@@ -19,6 +19,8 @@ import { removePost, suspendUser, unsuspendUser, isAdmin } from '../../services/
 import { auth, db } from '../../lib/firebase';
 import { Video, ResizeMode } from 'expo-av';
 import { Timestamp, doc, getDoc } from 'firebase/firestore';
+import { formatTimestamp } from '../../lib/dateUtils';
+import i18n from '../../locales/i18n';
 
 export default function AdminReportsScreen() {
   const router = useRouter();
@@ -31,6 +33,7 @@ export default function AdminReportsScreen() {
   const [performingAction, setPerformingAction] = useState(false);
   const [isUserAdmin, setIsUserAdmin] = useState(false);
   const [reporterNames, setReporterNames] = useState<Record<string, string>>({});
+  const [targetUserSuspended, setTargetUserSuspended] = useState<boolean | null>(null);
 
   useEffect(() => {
     // Check if user is admin
@@ -38,7 +41,7 @@ export default function AdminReportsScreen() {
       const admin = await isAdmin();
       setIsUserAdmin(admin);
       if (!admin) {
-        Alert.alert('Access Denied', 'You must be an admin to access this screen.');
+        Alert.alert(i18n.t('accessDenied'), i18n.t('accessDeniedMessage'));
         router.back();
         return;
       }
@@ -156,7 +159,7 @@ export default function AdminReportsScreen() {
           setShowActionModal(false);
           setSelectedReport(null);
           setActionNote('');
-          Alert.alert('Success', 'Report marked as reviewed.');
+          Alert.alert(i18n.t('success') || 'Success', i18n.t('reportMarkedReviewed'));
           return;
 
         case 'dismiss':
@@ -179,85 +182,40 @@ export default function AdminReportsScreen() {
       setShowActionModal(false);
       setSelectedReport(null);
       setActionNote('');
-      Alert.alert('Success', 'Action completed successfully.');
+      Alert.alert(i18n.t('success') || 'Success', i18n.t('actionSuccess'));
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to perform action.');
+      Alert.alert(i18n.t('error') || 'Error', error.message || i18n.t('actionError'));
     } finally {
       setPerformingAction(false);
     }
   };
 
-  const openActionModal = (report: Report) => {
+  const getTargetUserId = (report: Report | null): string | null => {
+    if (!report) return null;
+    if (report.targetType === 'user') return report.targetId;
+    return report.snapshot?.postOwnerId ?? null;
+  };
+
+  const openActionModal = async (report: Report) => {
     setSelectedReport(report);
     setActionNote('');
     setShowActionModal(true);
-  };
-
-  const formatDate = (timestamp: any) => {
-    if (!timestamp) return 'Unknown';
-    
-    try {
-      // Handle serverTimestamp placeholder - this happens when document hasn't been fully written yet
-      if (timestamp && typeof timestamp === 'object' && timestamp._methodName === 'serverTimestamp') {
-        return 'Pending...';
+    setTargetUserSuspended(null);
+    const targetUserId = getTargetUserId(report);
+    if (targetUserId) {
+      try {
+        const userSnap = await getDoc(doc(db, 'users', targetUserId));
+        setTargetUserSuspended(userSnap.exists() && userSnap.data()?.isSuspended === true);
+      } catch {
+        setTargetUserSuspended(false);
       }
-      
-      // Handle Firestore serverTimestamp placeholder object
-      if (timestamp && typeof timestamp === 'object' && 'serverTimestamp' in timestamp) {
-        return 'Pending...';
-      }
-      
-      let date: Date;
-      
-      // Handle Firestore Timestamp with toDate() method
-      if (timestamp && typeof timestamp.toDate === 'function') {
-        date = timestamp.toDate();
-      }
-      // Handle Firestore Timestamp with seconds property
-      else if (timestamp?.seconds !== undefined && typeof timestamp.seconds === 'number') {
-        date = new Date(timestamp.seconds * 1000);
-      }
-      // Handle Firestore Timestamp with _seconds property (alternative format)
-      else if (timestamp?._seconds !== undefined && typeof timestamp._seconds === 'number') {
-        date = new Date(timestamp._seconds * 1000);
-      }
-      // Handle if already a Date object
-      else if (timestamp instanceof Date) {
-        date = timestamp;
-      }
-      // Handle if it's a number (milliseconds)
-      else if (typeof timestamp === 'number' && !isNaN(timestamp)) {
-        date = new Date(timestamp);
-      }
-      // Handle string dates
-      else if (typeof timestamp === 'string') {
-        date = new Date(timestamp);
-      }
-      // If it's an object but not a valid timestamp, return pending
-      else if (timestamp && typeof timestamp === 'object') {
-        return 'Pending...';
-      }
-      // Try to parse as date
-      else {
-        date = new Date(timestamp);
-      }
-      
-      // Validate the date
-      if (isNaN(date.getTime())) {
-        return 'Pending...';
-      }
-      
-      // Format as DD/MM/YY (e.g., 23/2/26)
-      const day = date.getDate().toString().padStart(2, '0');
-      const month = (date.getMonth() + 1).toString().padStart(2, '0');
-      const year = date.getFullYear().toString().slice(-2);
-      
-      return `${day}/${month}/${year}`;
-    } catch (error) {
-      // Silently return pending instead of logging error for serverTimestamp placeholders
-      return 'Pending...';
+    } else {
+      setTargetUserSuspended(false);
     }
   };
+
+  const formatDate = (timestamp: unknown) =>
+    formatTimestamp(timestamp, { fallback: 'Unknown' });
 
   const renderReportItem = ({ item }: { item: Report }) => {
     const isPost = item.targetType === 'post';
@@ -276,7 +234,7 @@ export default function AdminReportsScreen() {
               color={item.status === 'open' ? '#FF3B30' : '#999'}
             />
             <Text style={styles.reportType}>
-              {isPost ? 'Post Report' : 'User Report'}
+              {isPost ? i18n.t('postReport') : i18n.t('userReport')}
             </Text>
             <View style={[styles.statusBadge, styles[`status${item.status}`]]}>
               <Text style={styles.statusText}>{item.status}</Text>
@@ -332,7 +290,7 @@ export default function AdminReportsScreen() {
           <View style={styles.reporterInfoContainer}>
             <Ionicons name="person-outline" size={14} color="#666" />
             <Text style={styles.reporterInfo}>
-              Reported by: {reporterNames[item.reporterId] || item.reporterId.substring(0, 8)}
+              {i18n.t('reportedBy')} {reporterNames[item.reporterId] || item.reporterId.substring(0, 8)}
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color="#999" />
@@ -345,7 +303,7 @@ export default function AdminReportsScreen() {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Checking permissions...</Text>
+        <Text style={styles.loadingText}>{i18n.t('checkingPermissions')}</Text>
       </View>
     );
   }
@@ -359,7 +317,7 @@ export default function AdminReportsScreen() {
           onPress={() => setStatusFilter('open')}
         >
           <Text style={[styles.filterText, statusFilter === 'open' && styles.filterTextActive]}>
-            Open ({reports.filter(r => r.status === 'open').length})
+            {i18n.t('filterOpen')} ({reports.filter(r => r.status === 'open').length})
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -367,7 +325,15 @@ export default function AdminReportsScreen() {
           onPress={() => setStatusFilter('reviewed')}
         >
           <Text style={[styles.filterText, statusFilter === 'reviewed' && styles.filterTextActive]}>
-            Reviewed
+            {i18n.t('filterReviewed')}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterTab, statusFilter === 'resolved' && styles.filterTabActive]}
+          onPress={() => setStatusFilter('resolved')}
+        >
+          <Text style={[styles.filterText, statusFilter === 'resolved' && styles.filterTextActive]}>
+            {i18n.t('filterResolved')}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -375,7 +341,7 @@ export default function AdminReportsScreen() {
           onPress={() => setStatusFilter(null)}
         >
           <Text style={[styles.filterText, statusFilter === null && styles.filterTextActive]}>
-            All
+            {i18n.t('filterAll')}
           </Text>
         </TouchableOpacity>
       </View>
@@ -384,12 +350,12 @@ export default function AdminReportsScreen() {
       {loading ? (
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>Loading reports...</Text>
+          <Text style={styles.loadingText}>{i18n.t('loadingReports')}</Text>
         </View>
       ) : reports.length === 0 ? (
         <View style={styles.centerContainer}>
           <Ionicons name="document-text-outline" size={64} color="#ccc" />
-          <Text style={styles.emptyText}>No reports found</Text>
+          <Text style={styles.emptyText}>{i18n.t('noReportsFound')}</Text>
         </View>
       ) : (
         <FlatList
@@ -410,7 +376,7 @@ export default function AdminReportsScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Moderation Actions</Text>
+              <Text style={styles.modalTitle}>{i18n.t('moderationActions')}</Text>
               <TouchableOpacity onPress={() => setShowActionModal(false)}>
                 <Ionicons name="close" size={24} color="#666" />
               </TouchableOpacity>
@@ -419,19 +385,19 @@ export default function AdminReportsScreen() {
             <ScrollView style={styles.modalContent}>
               {selectedReport && (
                 <>
-                  <Text style={styles.modalLabel}>Report Details</Text>
+                  <Text style={styles.modalLabel}>{i18n.t('reportDetailsLabel')}</Text>
                   <Text style={styles.modalText}>
-                    Type: {selectedReport.targetType === 'post' ? 'Post' : 'User'}
+                    {i18n.t('reportType')} {selectedReport.targetType === 'post' ? i18n.t('postReport') : i18n.t('userReport')}
                   </Text>
-                  <Text style={styles.modalText}>Reason: {selectedReport.reason}</Text>
+                  <Text style={styles.modalText}>{i18n.t('reportReasonLabel')} {selectedReport.reason}</Text>
                   {selectedReport.details && (
-                    <Text style={styles.modalText}>Details: {selectedReport.details}</Text>
+                    <Text style={styles.modalText}>{i18n.t('reportDetailsLabel2')} {selectedReport.details}</Text>
                   )}
 
-                  <Text style={styles.modalLabel}>Admin Note (optional)</Text>
+                  <Text style={styles.modalLabel}>{i18n.t('adminNoteOptional')}</Text>
                   <TextInput
                     style={styles.noteInput}
-                    placeholder="Add a note about this action..."
+                    placeholder={i18n.t('adminNotePlaceholder')}
                     value={actionNote}
                     onChangeText={setActionNote}
                     multiline
@@ -449,27 +415,31 @@ export default function AdminReportsScreen() {
                     disabled={performingAction}
                   >
                     <Ionicons name="trash-outline" size={20} color="#fff" />
-                    <Text style={styles.actionButtonText}>Remove Post</Text>
+                    <Text style={styles.actionButtonText}>{i18n.t('removePost')}</Text>
                   </TouchableOpacity>
                 )}
 
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.suspendButton]}
-                  onPress={() => handleAction('suspend_user')}
-                  disabled={performingAction}
-                >
-                  <Ionicons name="ban-outline" size={20} color="#fff" />
-                  <Text style={styles.actionButtonText}>Suspend User</Text>
-                </TouchableOpacity>
+                {selectedReport && targetUserSuspended !== true && getTargetUserId(selectedReport) && (
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.suspendButton]}
+                    onPress={() => handleAction('suspend_user')}
+                    disabled={performingAction}
+                  >
+                    <Ionicons name="ban-outline" size={20} color="#fff" />
+                    <Text style={styles.actionButtonText}>{i18n.t('suspendUser')}</Text>
+                  </TouchableOpacity>
+                )}
 
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.unsuspendButton]}
-                  onPress={() => handleAction('unsuspend_user')}
-                  disabled={performingAction}
-                >
-                  <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
-                  <Text style={styles.actionButtonText}>Unsuspend User</Text>
-                </TouchableOpacity>
+                {targetUserSuspended === true && (
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.unsuspendButton]}
+                    onPress={() => handleAction('unsuspend_user')}
+                    disabled={performingAction}
+                  >
+                    <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
+                    <Text style={styles.actionButtonText}>{i18n.t('unsuspendUser')}</Text>
+                  </TouchableOpacity>
+                )}
 
                 <TouchableOpacity
                   style={[styles.actionButton, styles.reviewButton]}
@@ -477,7 +447,7 @@ export default function AdminReportsScreen() {
                   disabled={performingAction}
                 >
                   <Ionicons name="eye-outline" size={20} color="#fff" />
-                  <Text style={styles.actionButtonText}>Mark Reviewed</Text>
+                  <Text style={styles.actionButtonText}>{i18n.t('markReviewed')}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -486,7 +456,7 @@ export default function AdminReportsScreen() {
                   disabled={performingAction}
                 >
                   <Ionicons name="close-circle-outline" size={20} color="#fff" />
-                  <Text style={styles.actionButtonText}>Dismiss</Text>
+                  <Text style={styles.actionButtonText}>{i18n.t('dismiss')}</Text>
                 </TouchableOpacity>
               </View>
 

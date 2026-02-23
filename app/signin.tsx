@@ -2,7 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
@@ -19,6 +19,7 @@ import {
   View,
 } from "react-native";
 import { auth, db } from "../lib/firebase";
+import { normalizePhoneForAuth } from "../lib/validations";
 import i18n from "../locales/i18n";
 import { useAuth } from "../context/AuthContext";
 
@@ -77,62 +78,11 @@ const SignInScreen = () => {
       let email = emailOrPhone;
       authEmail = email;
 
-      // If phone number, we need to find the user by phone in Firestore first
+      // If phone number, normalize the same way as signup so auth email matches
+      // (Firestore users collection is not readable when unauthenticated, so we rely on normalization only)
       if (!isEmail) {
-        // Clean phone number (remove spaces, dashes, parentheses, dots, and + sign) - same format used in signup
-        // Keep only digits for email generation
-        const cleanedPhone = emailOrPhone.replace(/[\s\-\(\)\.\+]/g, '');
-
-        // Try to find user in Firestore to get the exact phone format used during signup
-        let storedPhone = null;
-
-        try {
-          const usersRef = collection(db, "users");
-
-          // Try multiple phone formats to find the user
-          // Generate all possible variations of the phone number
-          const phoneVariations = [
-            cleanedPhone,                                    // Cleaned version (digits only)
-            emailOrPhone.trim(),                             // Original format (trimmed)
-            emailOrPhone.replace(/[\s\-\(\)\.]/g, ''),      // Without spaces/dashes/parentheses/dots but keep +
-            emailOrPhone.replace(/\+/g, ''),                 // Without + sign
-            emailOrPhone.replace(/[\s\-]/g, ''),            // Without spaces/dashes only
-            emailOrPhone.replace(/[^\d+]/g, ''),            // Only digits and +
-            emailOrPhone.replace(/[^\d]/g, ''),            // Only digits
-          ];
-
-          // Remove duplicates and empty strings
-          const uniqueVariations = [...new Set(phoneVariations)].filter(v => v.length > 0);
-
-          console.log("Searching for user with phone variations:", uniqueVariations);
-
-          for (const phoneVar of uniqueVariations) {
-            const phoneQuery = query(usersRef, where("phone", "==", phoneVar));
-            const phoneSnapshot = await getDocs(phoneQuery);
-
-            if (!phoneSnapshot.empty) {
-              const userData = phoneSnapshot.docs[0].data();
-              storedPhone = userData.phone; // Get the exact phone format stored in Firestore
-              console.log("✅ Found user with phone format:", storedPhone);
-              break;
-            }
-          }
-        } catch (searchErr) {
-          console.log("Phone search error (will try with cleaned phone):", searchErr);
-        }
-
-        // Generate email the same way as signup does
-        // Format: user_{phone}@forsa.app
-        // Use the stored phone if found, otherwise use cleaned input phone
-        // Always clean the phone (remove all non-digits) for email generation
-        const phoneForEmail = storedPhone
-          ? storedPhone.replace(/[\s\-\(\)\.\+]/g, '')
-          : cleanedPhone;
-
-        authEmail = `user_${phoneForEmail}@forsa.app`;
-
-        console.log("Attempting login with email:", authEmail);
-        console.log("Phone used for email generation:", phoneForEmail);
+        const normalizedPhone = normalizePhoneForAuth(emailOrPhone);
+        authEmail = `user_${normalizedPhone}@forsa.app`;
       }
 
       // Sign in with Firebase Auth

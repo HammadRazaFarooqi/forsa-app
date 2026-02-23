@@ -16,25 +16,35 @@ const SplashScreen = () => {
           const userDoc = await getDoc(doc(db, 'users', user.uid));
           if (userDoc.exists()) {
             const userData = userDoc.data();
-            const role = userData.role;
-            
-            // Navigate based on role
-        switch (role) {
-          case 'player':
-            router.replace('/player-feed');
-            return;
-          case 'agent':
-            router.replace('/agent-feed');
-            return;
-          case 'academy':
-            router.replace('/academy-feed');
-            return;
-          case 'parent':
-            router.replace('/parent-feed');
-            return;
-          case 'clinic':
-            router.replace('/clinic-feed');
-            return;
+            const role = (userData?.role || '').toLowerCase();
+
+            if (userData?.isSuspended === true) {
+              router.replace('/account-suspended');
+              return;
+            }
+
+            switch (role) {
+              case 'admin':
+                router.replace('/(admin)/dashboard');
+                return;
+              case 'player':
+                router.replace('/player-feed');
+                return;
+              case 'agent':
+                router.replace('/agent-feed');
+                return;
+              case 'academy':
+                router.replace('/academy-feed');
+                return;
+              case 'parent':
+                router.replace('/parent-feed');
+                return;
+              case 'clinic':
+                router.replace('/clinic-feed');
+                return;
+              default:
+                router.replace('/player-feed');
+                return;
             }
           }
         } catch (error) {

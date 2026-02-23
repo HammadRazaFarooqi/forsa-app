@@ -11,6 +11,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import i18n from '../locales/i18n';
 import { createReport, ReportReason, ReportTargetType, ReportSnapshot } from '../services/ReportService';
 
 interface ReportModalProps {
@@ -22,14 +23,19 @@ interface ReportModalProps {
   reportedUserName?: string;
 }
 
-const REPORT_REASONS: { value: ReportReason; label: string }[] = [
-  { value: 'spam', label: 'Spam' },
-  { value: 'harassment', label: 'Harassment' },
-  { value: 'nudity', label: 'Nudity or Sexual Content' },
-  { value: 'violence', label: 'Violence or Threats' },
-  { value: 'fake', label: 'Fake or Misleading' },
-  { value: 'other', label: 'Other' },
-];
+function getReasonLabel(value: ReportReason): string {
+  const key = {
+    spam: 'reportReasonSpam',
+    harassment: 'reportReasonHarassment',
+    nudity: 'reportReasonNudity',
+    violence: 'reportReasonViolence',
+    fake: 'reportReasonFake',
+    other: 'reportReasonOther',
+  }[value];
+  return i18n.t(key) || value;
+}
+
+const REPORT_REASONS: ReportReason[] = ['spam', 'harassment', 'nudity', 'violence', 'fake', 'other'];
 
 export default function ReportModal({
   visible,
@@ -45,7 +51,7 @@ export default function ReportModal({
 
   const handleSubmit = async () => {
     if (!selectedReason) {
-      Alert.alert('Error', 'Please select a reason for reporting');
+      Alert.alert(i18n.t('error') || 'Error', i18n.t('reportErrorSelectReason') || 'Please select a reason for reporting');
       return;
     }
 
@@ -59,11 +65,11 @@ export default function ReportModal({
         snapshot,
       });
 
-      Alert.alert('Success', 'Your report has been submitted. Thank you for helping keep our community safe.', [
+      Alert.alert(i18n.t('success') || 'Success', i18n.t('reportSuccess') || 'Your report has been submitted.', [
         { text: 'OK', onPress: handleClose },
       ]);
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to submit report. Please try again.');
+      Alert.alert(i18n.t('error') || 'Error', error.message || i18n.t('reportErrorSubmit') || 'Failed to submit report.');
     } finally {
       setLoading(false);
     }
@@ -85,7 +91,9 @@ export default function ReportModal({
       <View style={styles.overlay}>
         <View style={styles.modalContainer}>
           <View style={styles.header}>
-            <Text style={styles.title}>Report {targetType === 'post' ? 'Post' : 'User'}</Text>
+            <Text style={styles.title}>
+              {targetType === 'post' ? i18n.t('reportTitlePost') : i18n.t('reportTitleUser')}
+            </Text>
             <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
               <Ionicons name="close" size={24} color="#666" />
             </TouchableOpacity>
@@ -93,39 +101,39 @@ export default function ReportModal({
 
           <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
             {reportedUserName && (
-              <Text style={styles.subtitle}>Reporting: {reportedUserName}</Text>
+              <Text style={styles.subtitle}>{i18n.t('reportingUser')} {reportedUserName}</Text>
             )}
 
-            <Text style={styles.label}>Reason for reporting</Text>
-            {REPORT_REASONS.map((reason) => (
+            <Text style={styles.label}>{i18n.t('reasonForReporting')}</Text>
+            {REPORT_REASONS.map((reasonValue) => (
               <TouchableOpacity
-                key={reason.value}
+                key={reasonValue}
                 style={[
                   styles.reasonOption,
-                  selectedReason === reason.value && styles.reasonOptionSelected,
+                  selectedReason === reasonValue && styles.reasonOptionSelected,
                 ]}
-                onPress={() => setSelectedReason(reason.value)}
+                onPress={() => setSelectedReason(reasonValue)}
               >
                 <View style={styles.reasonRow}>
                   <View
                     style={[
                       styles.radioButton,
-                      selectedReason === reason.value && styles.radioButtonSelected,
+                      selectedReason === reasonValue && styles.radioButtonSelected,
                     ]}
                   >
-                    {selectedReason === reason.value && (
+                    {selectedReason === reasonValue && (
                       <View style={styles.radioButtonInner} />
                     )}
                   </View>
-                  <Text style={styles.reasonLabel}>{reason.label}</Text>
+                  <Text style={styles.reasonLabel}>{getReasonLabel(reasonValue)}</Text>
                 </View>
               </TouchableOpacity>
             ))}
 
-            <Text style={styles.label}>Additional details (optional)</Text>
+            <Text style={styles.label}>{i18n.t('additionalDetailsOptional')}</Text>
             <TextInput
               style={styles.textInput}
-              placeholder="Provide more information about this report..."
+              placeholder={i18n.t('reportDetailsPlaceholder')}
               value={details}
               onChangeText={setDetails}
               multiline
@@ -140,7 +148,7 @@ export default function ReportModal({
               onPress={handleClose}
               disabled={loading}
             >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={styles.cancelButtonText}>{i18n.t('cancel')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.button, styles.submitButton, !selectedReason && styles.submitButtonDisabled]}
@@ -150,7 +158,7 @@ export default function ReportModal({
               {loading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.submitButtonText}>Submit Report</Text>
+                <Text style={styles.submitButtonText}>{i18n.t('submitReport')}</Text>
               )}
             </TouchableOpacity>
           </View>

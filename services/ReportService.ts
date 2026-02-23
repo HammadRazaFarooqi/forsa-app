@@ -183,6 +183,17 @@ export async function createReport(params: CreateReportParams): Promise<string> 
     const cleanedReportData = removeUndefinedFields(reportData);
 
     const reportRef = await addDoc(collection(db, 'reports'), cleanedReportData);
+    try {
+      const { notifyAdmins } = await import('./NotificationService');
+      await notifyAdmins(
+        `New ${params.targetType} report`,
+        params.details || params.reason || `Report #${reportRef.id}`,
+        'report',
+        { reportId: reportRef.id, targetType: params.targetType, targetId: params.targetId }
+      );
+    } catch (e) {
+      console.warn('Report notification failed:', e);
+    }
     return reportRef.id;
   } catch (error: any) {
     console.error('Error creating report:', error);

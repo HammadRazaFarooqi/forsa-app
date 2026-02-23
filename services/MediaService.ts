@@ -398,3 +398,13 @@ export async function uploadAndSaveMedia(
   }
 }
 
+/**
+ * Cleanup media from Cloudinary when a post is removed (e.g. by moderation).
+ * Called from ModerationService.removePost. If mediaId is missing or cleanup
+ * is not configured, this no-ops so the rest of the flow is not broken.
+ */
+export async function cleanupMediaForPost(mediaId: string | undefined): Promise<void> {
+  if (!mediaId) return;
+  // TODO: fetch media doc by mediaId, get cloudinaryPublicId, call Cloudinary destroy,
+  // then delete or mark media doc in Firestore. For now no-op to keep removePost working.
+}

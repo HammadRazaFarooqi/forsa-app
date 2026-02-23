@@ -1,11 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useSegments } from 'expo-router';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { I18nManager, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import i18n from '../locales/i18n';
 import { useHamburgerMenu } from './HamburgerMenuContext';
 import { useAuth } from '../context/AuthContext';
+import { auth } from '../lib/firebase';
+import { subscribeMyNotifications } from '../services/NotificationService';
+import { getCurrentUserRole, type Role } from '../services/UserRoleService';
 
 interface MenuItem {
   label: string;
@@ -55,7 +58,9 @@ export default function HamburgerMenu() {
       currentPath.includes('/academy-assistance') ||
       currentPath.includes('/academy-chat') ||
       currentPath.includes('/academy-home') ||
-      currentPath.includes('/academy-bookings')) {
+      currentPath.includes('/academy-bookings') ||
+      currentPath.includes('/academy-search-clinics') ||
+      currentPath.includes('/academy-clinic-details')) {
       return 'academy';
     }
     // Explicitly exclude search routes - these should show player menu
@@ -63,7 +68,32 @@ export default function HamburgerMenu() {
     return 'player';
   };
 
-  const role = getRole();
+  const pathRole = getRole();
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [roleOnNotificationsScreen, setRoleOnNotificationsScreen] = useState<Role | null>(null);
+
+  // When on /notifications, keep menu role from user profile so menu doesn't switch to player
+  useEffect(() => {
+    if (currentPath !== '/notifications' || !auth.currentUser) {
+      setRoleOnNotificationsScreen(null);
+      return;
+    }
+    getCurrentUserRole().then(setRoleOnNotificationsScreen).catch(() => setRoleOnNotificationsScreen(null));
+  }, [currentPath]);
+
+  const role = (currentPath === '/notifications' && roleOnNotificationsScreen) ? roleOnNotificationsScreen : pathRole;
+
+  useEffect(() => {
+    if (!auth.currentUser) {
+      setUnreadNotificationCount(0);
+      return;
+    }
+    const unsubscribe = subscribeMyNotifications((notifications) => {
+      const unread = notifications.filter((n) => !n.read).length;
+      setUnreadNotificationCount(unread);
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Get menu items based on role
   const getMenuItems = (): MenuItem[] => {
@@ -79,6 +109,7 @@ export default function HamburgerMenu() {
         items = [...items,
         { label: i18n.t('parentFeed') || 'Parent Feed', route: '/parent-feed', icon: 'home-outline' },
         { label: i18n.t('parentEditProfile') || 'Edit Profile', route: '/parent-edit-profile', icon: 'create-outline' },
+        { label: i18n.t('notifications') || 'Notifications', route: '/notifications', icon: 'notifications-outline' },
         { label: 'My QR Code', route: '/my-qr-code', icon: 'qr-code-outline' },
         { label: i18n.t('searchAcademies') || 'Search Academies', route: '/parent-search-academies', icon: 'school-outline' },
         { label: i18n.t('searchClinics') || 'Search Clinics', route: '/parent-search-clinics', icon: 'medical-outline' },
@@ -90,6 +121,7 @@ export default function HamburgerMenu() {
         items = [...items,
         { label: i18n.t('agentFeed') || 'Feed', route: '/agent-feed', icon: 'home-outline' },
         { label: i18n.t('agentEditProfile') || 'Edit Profile', route: '/agent-edit-profile', icon: 'create-outline' },
+        { label: i18n.t('notifications') || 'Notifications', route: '/notifications', icon: 'notifications-outline' },
         { label: i18n.t('agentPlayers') || 'Players', route: '/agent-players', icon: 'people-outline' },
         { label: i18n.t('messages') || 'Messages', route: '/agent-contacts', icon: 'chatbubbles-outline' },
         { label: i18n.t('uploadMedia') || 'Upload Media', route: '/agent-upload-media', icon: 'cloud-upload-outline' },
@@ -99,6 +131,7 @@ export default function HamburgerMenu() {
         items = [...items,
         { label: i18n.t('clinicFeed') || 'Clinic Feed', route: '/clinic-feed', icon: 'home-outline' },
         { label: 'Scan Check-in', route: '/scan-checkin', icon: 'qr-code-outline', special: true },
+        { label: i18n.t('notifications') || 'Notifications', route: '/notifications', icon: 'notifications-outline' },
         { label: i18n.t('editServices') || 'Edit Services', route: '/clinic-edit-services', icon: 'list-outline' },
         { label: i18n.t('editTimetable') || 'Edit Timetable', route: '/clinic-edit-timetable', icon: 'time-outline' },
         { label: i18n.t('myBookings') || 'My Bookings', route: '/clinic-bookings', icon: 'calendar-outline' },
@@ -108,8 +141,10 @@ export default function HamburgerMenu() {
         items = [...items,
         { label: i18n.t('academyFeed') || 'Feed', route: '/academy-feed', icon: 'home-outline' },
         { label: 'Scan Check-in', route: '/scan-checkin', icon: 'qr-code-outline', special: true },
+        { label: i18n.t('notifications') || 'Notifications', route: '/notifications', icon: 'notifications-outline' },
         { label: i18n.t('academyEditProfile') || 'Edit Profile', route: '/academy-edit-profile', icon: 'create-outline' },
         { label: i18n.t('academyUploadMedia') || 'Upload Media', route: '/academy-upload-media', icon: 'cloud-upload-outline' },
+        { label: i18n.t('searchClinics') || 'Search Clinics', route: '/academy-search-clinics', icon: 'medical-outline' },
         { label: i18n.t('myBookings') || 'My Bookings', route: '/academy-bookings', icon: 'calendar-outline' },
         { label: i18n.t('academyMessages') || 'Messages', route: '/academy-messages', icon: 'chatbubbles-outline' },
         ];
@@ -118,6 +153,7 @@ export default function HamburgerMenu() {
         items = [...items,
         { label: i18n.t('feed') || 'Feed', route: '/player-feed', icon: 'home-outline' },
         { label: i18n.t('editProfile') || 'Edit Profile', route: '/player-profile', icon: 'create-outline' },
+        { label: i18n.t('notifications') || 'Notifications', route: '/notifications', icon: 'notifications-outline' },
         { label: 'My QR Code', route: '/my-qr-code', icon: 'qr-code-outline' },
         { label: i18n.t('uploadMedia') || 'Upload Media', route: '/player-upload-media', icon: 'cloud-upload-outline' },
         { label: i18n.t('messages') || 'Messages', route: '/player-messages', icon: 'chatbubbles-outline' },
@@ -191,6 +227,13 @@ export default function HamburgerMenu() {
                 >
                   <Ionicons name={item.icon as any} size={20} color="#000" style={styles.menuIcon} />
                   <Text style={styles.menuText}>{item.label}</Text>
+                  {item.route === '/notifications' && unreadNotificationCount > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadBadgeText}>
+                        {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                      </Text>
+                    </View>
+                  )}
                 </TouchableOpacity>
               </React.Fragment>
             ))}
@@ -310,6 +353,20 @@ const styles = StyleSheet.create({
     color: '#000',
     fontWeight: '500',
     flex: 1,
+  },
+  unreadBadge: {
+    backgroundColor: '#FF3B30',
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  unreadBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
   goldMenuItem: {
     backgroundColor: '#FFD700',

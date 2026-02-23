@@ -1,26 +1,31 @@
-import { addDoc, collection, getFirestore, serverTimestamp } from 'firebase/firestore';
+import { addDoc, collection, doc, getDoc, getFirestore, serverTimestamp } from 'firebase/firestore';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Alert, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import i18n from '../locales/i18n';
+import { auth } from '../lib/firebase';
+import { getCurrentUserRole, getVisibleToRoles } from '../services/UserRoleService';
 
-interface CreatePostScreenProps {
-  route: { params?: { feedType?: 'player' | 'agent' | 'academy' } };
-}
-
-export default function CreatePostScreen({ route }: CreatePostScreenProps) {
+export default function CreatePostScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ feedType?: string }>();
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
-  // route.params.feedType: 'player' | 'agent' | 'academy'
-  const feedType = route?.params?.feedType || 'player';
+
+  const feedType = (params?.feedType as 'player' | 'agent' | 'academy') || 'player';
 
   const handlePost = async () => {
     if (!content.trim()) {
-      Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
+      Alert.alert(i18n.t('missingFields') || 'Missing fields', i18n.t('fillAllRequiredFields') || 'Fill all required fields');
+      return;
+    }
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert(i18n.t('error') || 'Error', i18n.t('loginRequired') || 'You must be logged in');
       return;
     }
     setLoading(true);
     try {
-      // Check if user is suspended
       const { isUserSuspended } = await import('../services/ModerationService');
       const suspended = await isUserSuspended();
       if (suspended) {
@@ -29,20 +34,45 @@ export default function CreatePostScreen({ route }: CreatePostScreenProps) {
         return;
       }
 
+      const ownerRole = await getCurrentUserRole();
+      const visibleToRoles = getVisibleToRoles(ownerRole);
+
+      let author = user.displayName || 'User';
+      try {
+        const userDoc = await getDoc(doc(getFirestore(), 'users', user.uid));
+        if (userDoc.exists()) {
+          const d = userDoc.data();
+          author = d?.academyName || d?.agentName || d?.clinicName || d?.parentName || d?.name ||
+            (d?.firstName && d?.lastName ? `${d.firstName} ${d.lastName}`.trim() : author);
+        }
+      } catch {
+        // use default author
+      }
+
       const db = getFirestore();
-      const collectionName = feedType === 'agent' ? 'agentPosts' : feedType === 'academy' ? 'academyPosts' : 'posts';
-      await addDoc(collection(db, collectionName), {
-        author: i18n.t('moderator'), // You can replace with actual user name if needed
-        content,
+      const postData = {
+        ownerId: user.uid,
+        ownerRole,
+        visibleToRoles,
+        author,
+        content: content.trim(),
+        contentText: content.trim(),
         timestamp: serverTimestamp(),
-      });
+        createdAt: serverTimestamp(),
+        status: 'active',
+        visibilityScope: 'role_based',
+      };
+
+      await addDoc(collection(db, 'posts'), postData);
       setContent('');
-      Alert.alert(i18n.t('success'), i18n.t('postCreated'));
+      Alert.alert(i18n.t('success') || 'Success', i18n.t('postCreated') || 'Post created', [
+        { text: 'OK', onPress: () => router.back() },
+      ]);
     } catch (e: any) {
-      if (e.message && e.message.includes('suspended')) {
+      if (e.message?.includes?.('suspended')) {
         Alert.alert('Account Suspended', e.message);
       } else {
-        Alert.alert(i18n.t('error'), i18n.t('submissionError'));
+        Alert.alert(i18n.t('error') || 'Error', i18n.t('submissionError') || 'Submission failed');
       }
     }
     setLoading(false);
@@ -61,7 +91,7 @@ export default function CreatePostScreen({ route }: CreatePostScreenProps) {
         numberOfLines={5}
       />
       <TouchableOpacity style={styles.button} onPress={handlePost} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? i18n.t('loading') : i18n.t('post')}</Text>
+        <Text style={styles.buttonText}>{loading ? (i18n.t('loading') || 'Loading...') : (i18n.t('post') || 'Post')}</Text>
       </TouchableOpacity>
     </View>
   );

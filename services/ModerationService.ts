@@ -1,5 +1,7 @@
 import { auth, db } from '../lib/firebase';
-import { doc, updateDoc, getDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { cleanupMediaForPost } from './MediaService';
+import { createNotification } from './NotificationService';
 
 /**
  * Remove a post (soft delete)
@@ -13,11 +15,33 @@ export async function removePost(postId: string, adminId: string, note?: string)
       throw new Error('Post not found');
     }
 
+    const postData = postSnap.data();
+    const mediaId = postData?.mediaId;
+
     await updateDoc(postRef, {
       status: 'deleted',
       deletedAt: serverTimestamp(),
       deletedBy: adminId,
     });
+
+    // Notify post owner that their post was removed
+    const ownerId = postData?.ownerId;
+    if (ownerId) {
+      createNotification({
+        userId: ownerId,
+        title: 'Post removed',
+        body: note ? `Your post was removed by moderation. Reason: ${note}` : 'Your post was removed by moderation.',
+        type: 'system',
+        data: { postId, action: 'removed' },
+      }).catch((e) => console.warn('[ModerationService] Post-removed notification failed:', e));
+    }
+
+    // Cleanup media from Cloudinary (non-blocking)
+    if (mediaId) {
+      cleanupMediaForPost(mediaId).catch((e) =>
+        console.warn('[ModerationService] Media cleanup failed:', e)
+      );
+    }
   } catch (error: any) {
     console.error('Error removing post:', error);
     throw new Error(`Failed to remove post: ${error.message}`);
@@ -42,6 +66,15 @@ export async function suspendUser(userId: string, adminId: string, reason: strin
       suspendedBy: adminId,
       suspensionReason: reason,
     });
+
+    // Notify user that account was suspended
+    createNotification({
+      userId,
+      title: 'Account suspended',
+      body: reason || 'Your account has been suspended. Please contact support.',
+      type: 'system',
+      data: { action: 'suspended' },
+    }).catch((e) => console.warn('[ModerationService] Suspend notification failed:', e));
   } catch (error: any) {
     console.error('Error suspending user:', error);
     throw new Error(`Failed to suspend user: ${error.message}`);
@@ -66,6 +99,15 @@ export async function unsuspendUser(userId: string, adminId: string, note?: stri
       suspendedBy: null,
       suspensionReason: null,
     });
+
+    // Notify user that account was reactivated
+    createNotification({
+      userId,
+      title: 'Account reactivated',
+      body: note || 'Your account has been reactivated. You can sign in again.',
+      type: 'system',
+      data: { action: 'activated' },
+    }).catch((e) => console.warn('[ModerationService] Unsuspend notification failed:', e));
   } catch (error: any) {
     console.error('Error unsuspending user:', error);
     throw new Error(`Failed to unsuspend user: ${error.message}`);

@@ -261,6 +261,16 @@ export default function AdminDashboard() {
                     </View>
                     <Text style={styles.navText}>Reports</Text>
                 </TouchableOpacity>
+                <TouchableOpacity 
+                    style={styles.navBtn} 
+                    onPress={() => router.push('/(admin)/notifications')}
+                    activeOpacity={0.7}
+                >
+                    <View style={styles.navIconContainer}>
+                        <Ionicons name="notifications" size={24} color="#fff" />
+                    </View>
+                    <Text style={styles.navText}>Notifications</Text>
+                </TouchableOpacity>
             </View>
         </ScrollView>
     );

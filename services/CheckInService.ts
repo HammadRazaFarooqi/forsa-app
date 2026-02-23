@@ -14,6 +14,7 @@ import {
 import { getUserByCheckInCode } from './CheckInCodeService';
 import { getCurrentUserRole } from './UserRoleService';
 import { doc, getDoc } from 'firebase/firestore';
+import { notifyAdmins, createNotification } from './NotificationService';
 
 export type CheckInLocationRole = 'academy' | 'clinic';
 
@@ -240,6 +241,24 @@ export async function createCheckInFromScan(
 
     const checkInsRef = collection(db, 'checkins');
     const checkInRef = await addDoc(checkInsRef, checkInData);
+
+    try {
+      await notifyAdmins(
+        'New check-in',
+        locationName ? `${userName || 'User'} checked in at ${locationName}` : `${userName || 'User'} (${userRole}) checked in`,
+        'checkin',
+        { checkInId: checkInRef.id, locationId, userId }
+      );
+      await createNotification({
+        userId,
+        title: 'Check-in recorded',
+        body: locationName ? `You checked in at ${locationName}` : 'Check-in successful',
+        type: 'checkin',
+        data: { checkInId: checkInRef.id },
+      });
+    } catch (e) {
+      console.warn('Check-in notification failed:', e);
+    }
 
     // Return the created check-in
     return {

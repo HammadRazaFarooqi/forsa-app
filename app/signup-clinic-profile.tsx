@@ -29,7 +29,8 @@ import {
   validateEmail,
   validatePassword,
   validatePhone,
-  validateRequired
+  validateRequired,
+  normalizePhoneForAuth,
 } from '../lib/validations';
 import i18n from '../locales/i18n';
 
@@ -209,12 +210,9 @@ const handleSignup = async () => {
     setFormError('');
 
     // Step 1: Create Firebase Auth user
-    // Generate email from phone if email not provided (Firebase requires email)
-    // Clean phone number (remove spaces, dashes, parentheses, dots, and + sign) - keep only digits
-    const cleanedPhone = phone.replace(/[\s\-\(\)\.\+]/g, '');
-    const authEmail = email && email.trim().length > 0 
-      ? email.trim() 
-      : `user_${cleanedPhone}@forsa.app`;
+    // Always use phone for Firebase Auth so user can login with the same number they registered with.
+    // Real email (if provided) is stored in Firestore for display/contact only.
+    const authEmail = `user_${normalizePhoneForAuth(phone)}@forsa.app`;
     
     const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
     const user = userCredential.user;

@@ -5,6 +5,7 @@ import { Animated, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, 
 import i18n from '../locales/i18n';
 import { db, auth } from '../lib/firebase';
 import { collection, addDoc, doc, getDoc } from 'firebase/firestore';
+import { notifyProviderAndAdmins, createNotification } from '../services/NotificationService';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function ClinicDetailsScreen() {
@@ -130,7 +131,27 @@ export default function ClinicDetailsScreen() {
         price: Number(servicePrice) || 0,
       };
 
-      await addDoc(collection(db, 'bookings'), bookingData);
+      const bookingRef = await addDoc(collection(db, 'bookings'), bookingData);
+      const providerId = clinicId || clinic.id || '';
+      try {
+        await notifyProviderAndAdmins(
+          providerId,
+          i18n.t('newBookingRequest') || 'New booking request',
+          `${playerName} ${i18n.t('requestedBooking') || 'requested a booking'}: ${selectedServiceName}`,
+          'booking',
+          { bookingId: bookingRef.id },
+          user.uid
+        );
+        await createNotification({
+          userId: user.uid,
+          title: i18n.t('bookingRequestSent') || 'Booking request sent',
+          body: `${clinicName} – ${selectedDoctor}, ${selectedServiceName}`,
+          type: 'booking',
+          data: { bookingId: bookingRef.id },
+        });
+      } catch (e) {
+        console.warn('Notification create failed:', e);
+      }
 
       Alert.alert(
         i18n.t('reservation') || 'Reservation',
