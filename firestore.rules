@@ -275,6 +275,55 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Conversations collection
+    match /conversations/{conversationId} {
+      // Read: Users can only read conversations they are part of
+      allow read: if isAuthenticated() && 
+                     (resource.data.participant1Id == request.auth.uid ||
+                      resource.data.participant2Id == request.auth.uid);
+      
+      // Create: Users can create conversations where they are a participant
+      allow create: if isAuthenticated() && 
+                       (request.resource.data.participant1Id == request.auth.uid ||
+                        request.resource.data.participant2Id == request.auth.uid);
+      
+      // Update: Users can update conversations they are part of (for lastMessage, etc.)
+      allow update: if isAuthenticated() && 
+                       (resource.data.participant1Id == request.auth.uid ||
+                        resource.data.participant2Id == request.auth.uid);
+      
+      // Delete: Not allowed (conversations are permanent)
+      allow delete: if false;
+      
+      // Messages subcollection
+      match /messages/{messageId} {
+        // Read: Users can read messages in conversations they are part of
+        allow read: if isAuthenticated() && 
+                       (get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant1Id == request.auth.uid ||
+                        get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant2Id == request.auth.uid);
+        
+        // Create: Users can send messages in conversations they are part of
+        allow create: if isAuthenticated() && 
+                         request.resource.data.senderId == request.auth.uid &&
+                         (get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant1Id == request.auth.uid ||
+                          get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant2Id == request.auth.uid);
+        
+        // Update: Users can mark messages as read (only isRead field)
+        allow update: if isAuthenticated() && 
+                         (get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant1Id == request.auth.uid ||
+                          get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant2Id == request.auth.uid) &&
+                         // Only allow updating isRead field, and only if message is not from current user
+                         resource.data.senderId != request.auth.uid &&
+                         request.resource.data.isRead == true &&
+                         request.resource.data.senderId == resource.data.senderId &&
+                         request.resource.data.content == resource.data.content &&
+                         request.resource.data.createdAt == resource.data.createdAt;
+        
+        // Delete: Not allowed (messages are permanent)
+        allow delete: if false;
+      }
+    }
+
     // Admin can read all collections
     match /{document=**} {
       allow read: if isAdmin();

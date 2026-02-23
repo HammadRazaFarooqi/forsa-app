@@ -8,11 +8,14 @@ import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
+import { startConversationWithUser } from '../services/BookingMessagingService';
 
 type BookingItem = {
   id: string;
   patientName?: string;
   customerName?: string;
+  playerId?: string;
+  parentId?: string;
   service?: string;
   doctor?: string;
   date?: string;
@@ -54,6 +57,8 @@ export default function ClinicBookingsScreen() {
           id: docSnap.id,
           patientName: d.playerName,
           customerName: d.customerName,
+          playerId: d.playerId,
+          parentId: d.parentId,
           service: d.service,
           doctor: d.doctor,
           date: d.date,
@@ -237,6 +242,35 @@ export default function ClinicBookingsScreen() {
                       <Text style={styles.priceLabel}>{i18n.t('fee') || 'Fee'}</Text>
                       <Text style={styles.priceValue}>{booking.price != null ? `${booking.price} EGP` : '—'}</Text>
                     </View>
+                    
+                    {/* Start Chat Button */}
+                    {(booking.playerId || booking.parentId) && (
+                      <TouchableOpacity
+                        style={styles.chatButton}
+                        onPress={async () => {
+                          try {
+                            const customerId = booking.playerId || booking.parentId;
+                            if (customerId) {
+                              const conversationId = await startConversationWithUser(customerId);
+                              router.push({
+                                pathname: '/clinic-chat',
+                                params: {
+                                  conversationId,
+                                  otherUserId: customerId,
+                                  contact: booking.patientName || booking.customerName || 'Patient'
+                                }
+                              });
+                            }
+                          } catch (error: any) {
+                            Alert.alert(i18n.t('error') || 'Error', error.message || 'Failed to start conversation');
+                          }
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="chatbubble-ellipses" size={18} color="#000" />
+                        <Text style={styles.chatButtonText}>{i18n.t('startChat') || 'Start Chat'}</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 ))
               )}
@@ -373,4 +407,20 @@ const styles = StyleSheet.create({
   },
   priceLabel: { fontSize: 16, color: 'rgba(255, 255, 255, 0.7)' },
   priceValue: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
+  chatButton: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    gap: 8,
+  },
+  chatButtonText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '600',
+  },
 });

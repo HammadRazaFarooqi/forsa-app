@@ -2,11 +2,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { collection, getDocs, getFirestore, orderBy, query } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Animated, Easing, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, Alert } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import SimpleSelect from '../components/SimpleSelect';
 import i18n from '../locales/i18n';
+import { startConversationWithUser } from '../services/BookingMessagingService';
 
 // Define the Player type for type safety
 interface Player {
@@ -285,7 +286,25 @@ export default function AgentPlayersScreen() {
                 <TouchableOpacity style={styles.modalButton} onPress={() => { setShowProfile(false); router.push({ pathname: '/player-view-details', params: { id: selectedPlayer.id } }); }}>
                   <Text style={styles.modalButtonText}>{i18n.t('viewProfile') || 'View Profile'}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.modalButton} onPress={() => { setShowProfile(false); router.push({ pathname: '/agent-messages', params: { id: selectedPlayer.id, name: selectedPlayer.firstName + ' ' + selectedPlayer.lastName } }); }}>
+                <TouchableOpacity 
+                  style={styles.modalButton} 
+                  onPress={async () => {
+                    try {
+                      setShowProfile(false);
+                      const conversationId = await startConversationWithUser(selectedPlayer.id);
+                      router.push({ 
+                        pathname: '/agent-messages', 
+                        params: { 
+                          conversationId,
+                          otherUserId: selectedPlayer.id,
+                          name: `${selectedPlayer.firstName} ${selectedPlayer.lastName}`.trim() || 'Player'
+                        } 
+                      });
+                    } catch (error: any) {
+                      Alert.alert(i18n.t('error') || 'Error', error.message || 'Failed to start conversation');
+                    }
+                  }}
+                >
                   <Text style={styles.modalButtonText}>{i18n.t('message') || 'Message'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.modalButton, styles.modalButtonSecondary]} onPress={() => setShowProfile(false)}>

@@ -9,15 +9,15 @@ import i18n from '../locales/i18n';
 import { subscribeToConversations, Conversation } from '../services/MessagingService';
 import { getChattableUsers, startConversationWithUser } from '../services/BookingMessagingService';
 
-export default function PlayerMessagesScreen() {
+export default function ClinicMessagesScreen() {
   const { openMenu } = useHamburgerMenu();
+  const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [chattableUsers, setChattableUsers] = useState<Array<{userId: string; name: string; photo?: string; role: string}>>([]);
   const [loading, setLoading] = useState(true);
   const [loadingChattable, setLoadingChattable] = useState(false);
-  const router = useRouter();
-
+  
   React.useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: 1,
@@ -34,7 +34,6 @@ export default function PlayerMessagesScreen() {
       setLoading(false);
     });
 
-    // Load chattable users (for empty state)
     loadChattableUsers();
 
     return () => {
@@ -58,11 +57,11 @@ export default function PlayerMessagesScreen() {
     try {
       const conversationId = await startConversationWithUser(userId);
       router.push({
-        pathname: '/player-chat',
+        pathname: '/clinic-chat',
         params: {
           conversationId,
           otherUserId: userId,
-          name
+          contact: name
         }
       });
     } catch (error: any) {
@@ -70,6 +69,7 @@ export default function PlayerMessagesScreen() {
       Alert.alert(i18n.t('error') || 'Error', error.message || 'Failed to start conversation');
     }
   };
+
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -103,7 +103,7 @@ export default function PlayerMessagesScreen() {
               <View style={styles.emptyContainer}>
                 <Ionicons name="chatbubbles-outline" size={64} color="rgba(255, 255, 255, 0.3)" />
                 <Text style={styles.emptyText}>{i18n.t('noConversations') || 'No conversations yet'}</Text>
-                <Text style={styles.emptySubtext}>{i18n.t('startChatting') || 'Start chatting with academies and clinics you\'ve booked!'}</Text>
+                <Text style={styles.emptySubtext}>{i18n.t('startChatting') || 'Start chatting with players and parents who booked you!'}</Text>
                 
                 {loadingChattable ? (
                   <ActivityIndicator size="small" color="#fff" style={{ marginTop: 20 }} />
@@ -132,7 +132,7 @@ export default function PlayerMessagesScreen() {
                 ) : (
                   <TouchableOpacity
                     style={styles.viewBookingsButton}
-                    onPress={() => router.push('/player-bookings')}
+                    onPress={() => router.push('/clinic-bookings')}
                     activeOpacity={0.8}
                   >
                     <Text style={styles.viewBookingsButtonText}>View My Bookings</Text>
@@ -153,11 +153,11 @@ export default function PlayerMessagesScreen() {
                     key={item.id}
                     style={styles.conversationCard} 
                     onPress={() => router.push({ 
-                      pathname: '/player-chat', 
+                      pathname: '/clinic-chat', 
                       params: { 
                         conversationId: item.id, 
                         otherUserId: item.otherParticipantId || '',
-                        name: displayName 
+                        contact: displayName 
                       } 
                     })}
                     activeOpacity={0.8}
@@ -314,11 +314,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 4,
   },
-  lastMessageTime: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 4,
-  },
   chattableUsersContainer: {
     marginTop: 24,
     width: '100%',
@@ -368,3 +363,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+

@@ -8,6 +8,7 @@ import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { startConversationWithUser } from '../services/BookingMessagingService';
 
 export default function PlayerBookingsScreen() {
   const { openMenu } = useHamburgerMenu();
@@ -261,6 +262,32 @@ export default function PlayerBookingsScreen() {
                     )}
                     <Text style={styles.bookingPrice}>{booking.price || 0} EGP</Text>
                   </View>
+                  
+                  {/* Start Chat Button */}
+                  {booking.providerId && (
+                    <TouchableOpacity
+                      style={styles.chatButton}
+                      onPress={async () => {
+                        try {
+                          const conversationId = await startConversationWithUser(booking.providerId);
+                          router.push({
+                            pathname: '/player-chat',
+                            params: {
+                              conversationId,
+                              otherUserId: booking.providerId,
+                              name: booking.name || booking.providerName || 'Provider'
+                            }
+                          });
+                        } catch (error: any) {
+                          Alert.alert(i18n.t('error') || 'Error', error.message || 'Failed to start conversation');
+                        }
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="chatbubble-ellipses" size={18} color="#000" />
+                      <Text style={styles.chatButtonText}>{i18n.t('startChat') || 'Start Chat'}</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               ))
             )}
@@ -430,6 +457,22 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  chatButton: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    gap: 8,
+  },
+  chatButtonText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

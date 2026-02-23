@@ -14,7 +14,7 @@ import {
 } from '../services/MessagingService';
 import { auth } from '../lib/firebase';
 
-export default function AcademyChatScreen() {
+export default function ClinicChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
@@ -24,7 +24,7 @@ export default function AcademyChatScreen() {
   const params = useLocalSearchParams();
   const conversationId = params.conversationId as string | undefined;
   const otherUserId = params.otherUserId as string | undefined;
-  const contact = params.contact || i18n.t('academyChat');
+  const contact = params.contact || i18n.t('clinicChat') || 'Chat';
   const flatListRef = useRef<FlatList>(null);
 
   // Initialize conversation and subscribe to messages
@@ -168,7 +168,7 @@ export default function AcademyChatScreen() {
           style={styles.input}
           value={input}
           onChangeText={setInput}
-          placeholder={i18n.t('typeMessage')}
+          placeholder={i18n.t('typeMessage') || 'Type a message...'}
           placeholderTextColor="#aaa"
         />
         <TouchableOpacity 
@@ -176,7 +176,7 @@ export default function AcademyChatScreen() {
           onPress={handleSendMessage}
           disabled={loading || !conversationIdState}
         >
-          <Text style={styles.sendBtnText}>{i18n.t('send')}</Text>
+          <Text style={styles.sendBtnText}>{i18n.t('send') || 'Send'}</Text>
         </TouchableOpacity>
       </View>
       <Image source={require('../assets/logo.png')} style={styles.forsaLogo} />
@@ -315,3 +315,4 @@ const styles = StyleSheet.create({
   },
   forsaLogo: { position: 'absolute', bottom: 18, left: '50%', transform: [{ translateX: -24 }], width: 48, height: 48, opacity: 0.18, zIndex: 1 },
 });
+

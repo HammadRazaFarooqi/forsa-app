@@ -45,7 +45,9 @@ export default function HamburgerMenu() {
     if (currentPath.includes('/clinic-feed') ||
       currentPath.includes('/clinic-edit-services') ||
       currentPath.includes('/clinic-edit-timetable') ||
-      currentPath.includes('/clinic-bookings')) {
+      currentPath.includes('/clinic-bookings') ||
+      currentPath.includes('/clinic-messages') ||
+      currentPath.includes('/clinic-chat')) {
       return 'clinic';
     }
     // Academy routes - but exclude search routes that players use
@@ -135,6 +137,7 @@ export default function HamburgerMenu() {
         { label: i18n.t('editServices') || 'Edit Services', route: '/clinic-edit-services', icon: 'list-outline' },
         { label: i18n.t('editTimetable') || 'Edit Timetable', route: '/clinic-edit-timetable', icon: 'time-outline' },
         { label: i18n.t('myBookings') || 'My Bookings', route: '/clinic-bookings', icon: 'calendar-outline' },
+        { label: i18n.t('messages') || 'Messages', route: '/clinic-messages', icon: 'chatbubbles-outline' },
         ];
         break;
       case 'academy':

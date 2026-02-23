@@ -8,6 +8,7 @@ import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { startConversationWithUser } from '../services/BookingMessagingService';
 
 type BookingItem = {
   id: string;
@@ -15,6 +16,8 @@ type BookingItem = {
   status: string;
   createdAt?: string;
   playerName?: string;
+  playerId?: string;
+  parentId?: string;
   playerAge?: string;
   ageGroup?: string;
   program?: string;
@@ -64,6 +67,8 @@ export default function AcademyBookingsScreen() {
             status: d.status || 'pending',
             createdAt: d.createdAt,
             playerName: d.playerName || d.customerName,
+            playerId: d.playerId,
+            parentId: d.parentId,
             playerAge: d.ageGroup || d.playerAge,
             program: d.program,
             date: d.date,
@@ -283,6 +288,35 @@ export default function AcademyBookingsScreen() {
                       <Text style={styles.priceLabel}>{i18n.t('total') || 'Total'}</Text>
                       <Text style={styles.priceValue}>{booking.price != null ? `${booking.price} EGP` : '—'}</Text>
                     </View>
+                    
+                    {/* Start Chat Button - Only for academy bookings (players/parents who booked) */}
+                    {booking.type === 'academy' && (booking.playerId || booking.parentId) && (
+                      <TouchableOpacity
+                        style={styles.chatButton}
+                        onPress={async () => {
+                          try {
+                            const customerId = booking.playerId || booking.parentId;
+                            if (customerId) {
+                              const conversationId = await startConversationWithUser(customerId);
+                              router.push({
+                                pathname: '/academy-chat',
+                                params: {
+                                  conversationId,
+                                  otherUserId: customerId,
+                                  contact: booking.playerName || 'Customer'
+                                }
+                              });
+                            }
+                          } catch (error: any) {
+                            Alert.alert(i18n.t('error') || 'Error', error.message || 'Failed to start conversation');
+                          }
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Ionicons name="chatbubble-ellipses" size={18} color="#000" />
+                        <Text style={styles.chatButtonText}>{i18n.t('startChat') || 'Start Chat'}</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 ))
               )}

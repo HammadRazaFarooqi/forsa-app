@@ -2,25 +2,33 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Animated, Easing, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Image, Modal } from 'react-native';
 import i18n from '../locales/i18n';
-
-interface Message {
-  id: string;
-  text: string;
-  sender: 'agent' | 'player';
-  timestamp: number;
-}
+import { 
+  getOrCreateConversation, 
+  sendMessage, 
+  subscribeToMessages, 
+  markMessagesAsRead,
+  Message 
+} from '../services/MessagingService';
+import { getChattableUsers, startConversationWithUser } from '../services/BookingMessagingService';
+import { auth } from '../lib/firebase';
 
 export default function AgentMessagesScreen() {
   const router = useRouter();
-  const { id, name } = useLocalSearchParams<{ id?: string; name?: string }>();
-  const [messages, setMessages] = useState<Message[]>([
-    { id: '1', text: i18n.t('helloPlayer') || 'Hello, how can I help you?', sender: 'agent', timestamp: Date.now() - 60000 },
-    { id: '2', text: i18n.t('hiAgent') || 'Hi Agent, I have a question.', sender: 'player', timestamp: Date.now() - 50000 },
-    { id: '3', text: i18n.t('sureAsk') || 'Sure, go ahead!', sender: 'agent', timestamp: Date.now() - 40000 },
-  ]);
+  const { conversationId, otherUserId, id, name } = useLocalSearchParams<{ 
+    conversationId?: string; 
+    otherUserId?: string; 
+    id?: string; 
+    name?: string 
+  }>();
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [conversationIdState, setConversationIdState] = useState<string | null>(null);
+  const [chattableUsers, setChattableUsers] = useState<Array<{userId: string; name: string; photo?: string; role: string}>>([]);
+  const [showUsersList, setShowUsersList] = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -33,23 +41,124 @@ export default function AgentMessagesScreen() {
     }).start();
   }, []);
 
+  // Load chattable users
   useEffect(() => {
-    if (flatListRef.current) {
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+    const loadUsers = async () => {
+      try {
+        setLoadingUsers(true);
+        const users = await getChattableUsers();
+        setChattableUsers(users);
+      } catch (error) {
+        console.error('Error loading chattable users:', error);
+      } finally {
+        setLoadingUsers(false);
+      }
+    };
+    loadUsers();
+  }, []);
+
+  // Initialize conversation and subscribe to messages
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+
+    const initializeChat = async () => {
+      try {
+        setLoading(true);
+        let convId = conversationId;
+
+        // If no conversationId but we have otherUserId, create/get conversation
+        if (!convId && otherUserId) {
+          convId = await getOrCreateConversation(otherUserId);
+          setConversationIdState(convId);
+        } else if (convId) {
+          setConversationIdState(convId);
+        } else if (id) {
+          // Legacy support: create conversation with player
+          convId = await getOrCreateConversation(id);
+          setConversationIdState(convId);
+        } else {
+          setLoading(false);
+          return;
+        }
+
+        // Mark messages as read when opening chat
+        if (convId) {
+          await markMessagesAsRead(convId);
+        }
+
+        // Subscribe to real-time messages
+        if (convId) {
+          unsubscribe = subscribeToMessages(convId, (msgs) => {
+            setMessages(msgs);
+            setLoading(false);
+            // Scroll to end when new messages arrive
+            setTimeout(() => {
+              if (flatListRef.current && msgs.length > 0) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            }, 100);
+          });
+        }
+      } catch (error: any) {
+        console.error('Error initializing chat:', error);
+        setLoading(false);
+      }
+    };
+
+    initializeChat();
+
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [conversationId, otherUserId, id]);
+
+  useEffect(() => {
+    if (flatListRef.current && messages.length > 0) {
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
     }
   }, [messages]);
 
-  const sendMessage = () => {
-    if (!input.trim()) return;
-    setMessages(prev => [
-      ...prev,
-      { id: Date.now().toString(), text: input, sender: 'agent', timestamp: Date.now() },
-    ]);
-    setInput('');
+  const handleSendMessage = async () => {
+    if (!input.trim() || !conversationIdState) return;
+
+    try {
+      await sendMessage(conversationIdState, input.trim());
+      setInput('');
+      
+      // Mark messages as read after sending
+      await markMessagesAsRead(conversationIdState);
+    } catch (error: any) {
+      console.error('Error sending message:', error);
+    }
+  };
+
+  const handleSwitchUser = async (userId: string, userName: string) => {
+    try {
+      const convId = await startConversationWithUser(userId);
+      router.replace({
+        pathname: '/agent-messages',
+        params: {
+          conversationId: convId,
+          otherUserId: userId,
+          name: userName
+        }
+      });
+      setShowUsersList(false);
+    } catch (error: any) {
+      console.error('Error switching user:', error);
+    }
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView 
+      style={styles.container} 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
       <LinearGradient
         colors={['#000000', '#1a1a1a', '#2d2d2d']}
         style={styles.gradient}
@@ -64,29 +173,52 @@ export default function AgentMessagesScreen() {
               <Text style={styles.headerTitle}>{name || i18n.t('player') || 'Player'}</Text>
               <Text style={styles.headerSubtitle}>{i18n.t('chatting') || 'Chatting'}</Text>
         </View>
+            <TouchableOpacity 
+              style={styles.usersButton} 
+              onPress={() => setShowUsersList(true)}
+            >
+              <Ionicons name="people" size={24} color="#fff" />
+            </TouchableOpacity>
       </View>
 
       {/* Chat Area */}
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={item => item.id}
-        renderItem={({ item }) => (
-          <View style={[
-            styles.bubble,
-            item.sender === 'agent' ? styles.agentBubble : styles.playerBubble,
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={{ marginTop: 12, color: 'rgba(255, 255, 255, 0.7)' }}>{i18n.t('loading') || 'Loading messages...'}</Text>
+        </View>
+      ) : (
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={item => item.id}
+          renderItem={({ item }) => {
+            const currentUserId = auth.currentUser?.uid;
+            const isSent = item.senderId === currentUserId;
+            return (
+              <View style={[
+                styles.bubble,
+                isSent ? styles.agentBubble : styles.playerBubble,
               ]}>
                 <Text style={[
                   styles.bubbleText,
-                  item.sender === 'agent' ? styles.agentBubbleText : styles.playerBubbleText
-          ]}>
-                  {item.text}
+                  isSent ? styles.agentBubbleText : styles.playerBubbleText
+                ]}>
+                  {item.content || (item.mediaUrl ? 'Media' : '')}
                 </Text>
-          </View>
-        )}
-            contentContainerStyle={styles.chatContent}
-        showsVerticalScrollIndicator={false}
-      />
+              </View>
+            );
+          }}
+          contentContainerStyle={styles.chatContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={
+            <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 40 }}>
+              <Text style={{ color: 'rgba(255, 255, 255, 0.6)', fontSize: 16 }}>{i18n.t('noMessages') || 'No messages yet'}</Text>
+            </View>
+          }
+        />
+      )}
 
       {/* Input Bar */}
           <View style={styles.inputBar}>
@@ -99,10 +231,70 @@ export default function AgentMessagesScreen() {
           onSubmitEditing={sendMessage}
           returnKeyType="send"
         />
-            <TouchableOpacity style={styles.sendBtn} onPress={sendMessage} activeOpacity={0.8}>
+            <TouchableOpacity 
+              style={styles.sendBtn} 
+              onPress={handleSendMessage} 
+              activeOpacity={0.8}
+              disabled={loading || !conversationIdState}
+            >
               <Ionicons name="send" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
+
+      {/* Users List Modal */}
+      <Modal
+        visible={showUsersList}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowUsersList(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>All Users</Text>
+              <TouchableOpacity onPress={() => setShowUsersList(false)}>
+                <Ionicons name="close" size={28} color="#000" />
+              </TouchableOpacity>
+            </View>
+            {loadingUsers ? (
+              <View style={styles.modalLoading}>
+                <ActivityIndicator size="large" color="#000" />
+              </View>
+            ) : (
+              <FlatList
+                data={chattableUsers}
+                keyExtractor={item => item.userId}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={[
+                      styles.userItem,
+                      item.userId === otherUserId && styles.userItemActive
+                    ]}
+                    onPress={() => handleSwitchUser(item.userId, item.name)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.userAvatar}>
+                      {item.photo ? (
+                        <Image source={{ uri: item.photo }} style={styles.userAvatarImage} />
+                      ) : (
+                        <Ionicons name="person" size={24} color="#000" />
+                      )}
+                    </View>
+                    <View style={styles.userInfo}>
+                      <Text style={styles.userName}>{item.name}</Text>
+                      <Text style={styles.userRole}>{item.role}</Text>
+                    </View>
+                    {item.userId === otherUserId && (
+                      <Ionicons name="checkmark-circle" size={24} color="#000" />
+                    )}
+                  </TouchableOpacity>
+                )}
+                contentContainerStyle={styles.modalListContent}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
         </Animated.View>
       </LinearGradient>
     </KeyboardAvoidingView>
@@ -138,6 +330,15 @@ const styles = StyleSheet.create({
     marginLeft: -44, // Negative margin to center title while keeping back button on left
     paddingHorizontal: 44, // Add padding to ensure title doesn't overlap with back button
   },
+  usersButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 16,
+  },
   headerTitle: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -151,7 +352,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   chatContent: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
     paddingBottom: 100,
   },
   bubble: {
@@ -160,6 +362,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     marginBottom: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   agentBubble: {
     backgroundColor: '#000',
@@ -173,6 +379,8 @@ const styles = StyleSheet.create({
   },
   bubbleText: {
     fontSize: 16,
+    fontWeight: '400',
+    lineHeight: 20,
   },
   agentBubbleText: {
     color: '#fff',
@@ -206,5 +414,78 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  modalLoading: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  modalListContent: {
+    padding: 16,
+  },
+  userItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+    backgroundColor: '#f8f8f8',
+  },
+  userItemActive: {
+    backgroundColor: '#e8e8e8',
+    borderWidth: 2,
+    borderColor: '#000',
+  },
+  userAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#ddd',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  userAvatarImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+  },
+  userInfo: {
+    flex: 1,
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 4,
+  },
+  userRole: {
+    fontSize: 12,
+    color: '#666',
+    textTransform: 'capitalize',
   },
 });

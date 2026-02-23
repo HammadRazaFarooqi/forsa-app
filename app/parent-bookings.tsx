@@ -8,6 +8,7 @@ import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, getDocs, updateDoc, doc, orderBy } from 'firebase/firestore';
+import { startConversationWithUser } from '../services/BookingMessagingService';
 
 export default function ParentBookingsScreen() {
   const { openMenu } = useHamburgerMenu();
@@ -277,6 +278,32 @@ export default function ParentBookingsScreen() {
                       </TouchableOpacity>
                     )}
                   </View>
+                  
+                  {/* Start Chat Button */}
+                  {item.providerId && (
+                    <TouchableOpacity
+                      style={styles.chatButton}
+                      onPress={async () => {
+                        try {
+                          const conversationId = await startConversationWithUser(item.providerId);
+                          router.push({
+                            pathname: '/academy-chat', // Reuse academy-chat
+                            params: {
+                              conversationId,
+                              otherUserId: item.providerId,
+                              contact: item.name || item.providerName || 'Provider'
+                            }
+                          });
+                        } catch (error: any) {
+                          Alert.alert(i18n.t('error') || 'Error', error.message || 'Failed to start conversation');
+                        }
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="chatbubble-ellipses" size={18} color="#000" />
+                      <Text style={styles.chatButtonText}>{i18n.t('startChat') || 'Start Chat'}</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
               )}
               ListEmptyComponent={
@@ -455,6 +482,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#ef4444',
+  },
+  chatButton: {
+    backgroundColor: '#000',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    gap: 8,
+  },
+  chatButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   emptyState: {
     alignItems: 'center',
