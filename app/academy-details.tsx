@@ -147,7 +147,6 @@ export default function AcademyDetailsScreen() {
           playerName = userData.name || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || playerName;
         }
       } catch (err) {
-        console.log('Error fetching user name, using default');
       }
 
       const bookingData = {

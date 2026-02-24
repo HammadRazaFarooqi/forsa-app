@@ -52,12 +52,8 @@ export default function ParentSearchAcademiesScreen() {
         const q = query(academiesRef);
         const querySnapshot = await getDocs(q);
 
-        console.log(`Found ${querySnapshot.size} academies in 'academies' collection`);
-
         querySnapshot.forEach((doc) => {
           const data = doc.data();
-          // Log data to ensure we map fields correctly
-          // console.log('Academy data:', data);
 
           academyList.push({
             id: doc.id,

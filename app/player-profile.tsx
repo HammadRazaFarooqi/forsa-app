@@ -39,7 +39,6 @@ export default function PlayerProfileScreen() {
   const fetchUserData = async () => {
     try {
       const user = auth.currentUser;
-      console.log('Current User:', user ? user.uid : 'No user');
 
       if (!user) {
         setLoading(false);
@@ -51,11 +50,8 @@ export default function PlayerProfileScreen() {
       const playerDocRef = doc(db, 'players', user.uid);
       const playerDocSnap = await getDoc(playerDocRef);
 
-      console.log('Fetching from players:', playerDocSnap.exists());
-
       if (playerDocSnap.exists()) {
         const data = playerDocSnap.data();
-        console.log('Player Data:', data);
         setFirstName(data.firstName || '');
         setLastName(data.lastName || '');
         setEmail(data.email || '');
@@ -68,16 +64,12 @@ export default function PlayerProfileScreen() {
           setProfilePhotoUrl(data.profilePhoto);
         }
       } else {
-        console.log('Fallback to users collection');
         // Fallback to 'users' collection if not found in 'players'
         const userDocRef = doc(db, 'users', user.uid);
         const userDocSnap = await getDoc(userDocRef);
 
-        console.log('Fetching from users:', userDocSnap.exists());
-
         if (userDocSnap.exists()) {
           const data = userDocSnap.data();
-          console.log('User Data:', data);
           setFirstName(data.firstName || '');
           setLastName(data.lastName || '');
           setEmail(data.email || '');
@@ -133,12 +125,10 @@ export default function PlayerProfileScreen() {
       if (profilePhoto && profilePhoto !== profilePhotoUrl && 
           (profilePhoto.startsWith('file://') || profilePhoto.startsWith('content://'))) {
         try {
-          console.log('Uploading profile photo to Firebase Storage...');
           finalProfilePhotoUrl = await uploadImageToStorage(
             profilePhoto,
             `players/${user.uid}/profilePhoto.jpg`
           );
-          console.log('Profile photo uploaded:', finalProfilePhotoUrl);
           setProfilePhotoUrl(finalProfilePhotoUrl);
         } catch (error) {
           console.error('Error uploading profile photo:', error);

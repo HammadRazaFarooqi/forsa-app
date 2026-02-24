@@ -44,7 +44,6 @@ if (!admin.apps.length) {
             credential: admin.credential.applicationDefault(),
           });
           initialized = true;
-          console.log('✅ Firebase Admin initialized with Application Default Credentials');
         } catch (adcError) {
           throw new Error(
             'Firebase service account not found. Please provide one of the following:\n' +
@@ -63,7 +62,6 @@ if (!admin.apps.length) {
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
-      console.log('✅ Firebase Admin initialized with service account');
     }
   } catch (error) {
     console.error('Firebase Admin initialization error:', error);

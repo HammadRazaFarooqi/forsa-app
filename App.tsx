@@ -23,5 +23,4 @@ initializeLanguage().catch(error => {
 // Entry point for Expo Router
 export { default } from 'expo-router/entry';
 
-console.log('APP FILE CHANGED');
 I18nManager.allowRTL(true);

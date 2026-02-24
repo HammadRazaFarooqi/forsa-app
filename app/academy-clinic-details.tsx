@@ -136,7 +136,6 @@ export default function AcademyClinicDetailsScreen() {
           academyName = userData.academyName || userData.name || academyName;
         }
       } catch (err) {
-        console.log('Error fetching academy name, using default');
       }
 
       const firstService = clinic.services && clinic.services[0];

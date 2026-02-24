@@ -90,14 +90,7 @@ export async function uploadMedia(
   const uploadPreset = getEnvVar('EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET');
   const folder = getEnvVar('EXPO_PUBLIC_CLOUDINARY_FOLDER', 'CLOUDINARY_UPLOAD_FOLDER') || 'forsa/media';
 
-  // Debug logging (remove in production)
-  console.log('[MediaService] Environment variables:', {
-    cloudName: cloudName ? `${cloudName.substring(0, 4)}...` : 'NOT FOUND',
-    uploadPreset: uploadPreset ? `${uploadPreset.substring(0, 4)}...` : 'NOT FOUND',
-    folder,
-    'process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME': process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME,
-    'process.env.CLOUDINARY_CLOUD_NAME': process.env.CLOUDINARY_CLOUD_NAME,
-  });
+
 
   // Check if credentials are missing or empty
   if (!cloudName || !cloudName.trim() || !uploadPreset || !uploadPreset.trim()) {
@@ -480,7 +473,6 @@ export async function cleanupMediaForPost(mediaId: string | undefined): Promise<
     
     // Delete from Firestore
     await deleteDoc(mediaRef);
-    console.log(`[MediaService] Successfully cleaned up media ${mediaId}`);
   } catch (error: any) {
     console.error(`[MediaService] Error cleaning up media ${mediaId}:`, error);
     // Don't throw - cleanup failures shouldn't break the moderation flow

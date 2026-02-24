@@ -36,7 +36,6 @@ export default function ParentEditProfileScreen() {
   const fetchUserData = async () => {
     try {
       const user = auth.currentUser;
-      console.log('Current User:', user ? user.uid : 'No user');
 
       if (!user) {
         setLoading(false);
@@ -47,11 +46,8 @@ export default function ParentEditProfileScreen() {
       const docRef = doc(db, 'parents', user.uid);
       const docSnap = await getDoc(docRef);
 
-      console.log('Fetching from parents:', docSnap.exists());
-
       if (docSnap.exists()) {
         const data = docSnap.data();
-        console.log('Parent Data:', data);
         setName(data.parentName || '');
         setEmail(data.email || '');
         setPhone(data.phone || '');
@@ -60,16 +56,12 @@ export default function ParentEditProfileScreen() {
           setChildren(data.children);
         }
       } else {
-        console.log('Fallback to users collection');
         // Fallback to 'users' collection if not found in 'parents'
         const userDocRef = doc(db, 'users', user.uid);
         const userDocSnap = await getDoc(userDocRef);
 
-        console.log('Fetching from users:', userDocSnap.exists());
-
         if (userDocSnap.exists()) {
           const data = userDocSnap.data();
-          console.log('User Data:', data);
           setName(data.parentName || data.name || '');
           setEmail(data.email || '');
           setPhone(data.phone || '');

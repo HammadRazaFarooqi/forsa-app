@@ -61,9 +61,6 @@ async function generateAndReserveCode(uid: string): Promise<string | null> {
     if (reserved) {
       return code;
     }
-    
-    // If code collision, try again
-    console.log(`Code collision for ${code}, retrying...`);
   }
   
   console.error('Failed to generate unique check-in code after max retries');

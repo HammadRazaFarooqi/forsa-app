@@ -60,18 +60,14 @@ export default function ParentSearchClinicsScreen() {
   const fetchClinics = async () => {
     try {
       setLoading(true);
-      console.log('Starting to fetch clinics...');
 
       const clinicsRef = collection(db, 'clinics');
       const q = query(clinicsRef);
       const querySnapshot = await getDocs(q);
 
-      console.log(`Found ${querySnapshot.size} clinics in 'clinics' collection`);
-
       const clinicList: Clinic[] = [];
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        console.log('Clinic data:', doc.id, data.clinicName);
 
         // Extract services that are selected
         const clinicServices: string[] = [];
@@ -101,7 +97,6 @@ export default function ParentSearchClinicsScreen() {
         });
       });
 
-      console.log(`Total clinics processed: ${clinicList.length}`);
       setClinics(clinicList);
     } catch (error) {
       console.error('Error fetching clinics:', error);

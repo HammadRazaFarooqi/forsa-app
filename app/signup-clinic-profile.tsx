@@ -257,7 +257,6 @@ const handleSignup = async () => {
     // Also save to role-specific collection
     await setDoc(doc(db, 'clinics', user.uid), userData);
 
-    console.log('✅ Clinic signup success');
     router.replace('/clinic-feed');
   } catch (err: any) {
     let errorMsg = i18n.t('signupFailedMessage');

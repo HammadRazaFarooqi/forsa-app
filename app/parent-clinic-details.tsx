@@ -80,7 +80,6 @@ export default function ParentClinicDetailsScreen() {
           doctors: data.doctors ? data.doctors.map((d: any) => d.name) : []
         });
       } else {
-        console.log('No such document!');
       }
     } catch (error) {
       console.error('Error fetching clinic details:', error);

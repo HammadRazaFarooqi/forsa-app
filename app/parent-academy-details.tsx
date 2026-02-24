@@ -51,7 +51,6 @@ export default function ParentAcademyDetailsScreen() {
           email: data.email
         });
       } else {
-        console.log('No such academy document!');
       }
     } catch (error) {
       console.error('Error fetching academy details:', error);

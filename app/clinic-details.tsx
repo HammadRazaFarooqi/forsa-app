@@ -92,7 +92,6 @@ export default function ClinicDetailsScreen() {
           playerName = userData.name || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || playerName;
         }
       } catch (err) {
-        console.log('Error fetching user name, using default');
       }
 
       // Fetch clinic details from Firestore if available
@@ -110,7 +109,6 @@ export default function ClinicDetailsScreen() {
           }
         }
       } catch (err) {
-        console.log('Using parsed clinic data');
       }
 
       const bookingData = {
