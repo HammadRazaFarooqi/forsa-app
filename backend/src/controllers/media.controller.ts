@@ -1,9 +1,7 @@
-import { Request, Response } from 'express';
 import { v2 as cloudinary } from 'cloudinary';
+import { Request, Response } from 'express';
 import { db } from '../config/firebase';
-import { doc, getDoc } from 'firebase-admin/firestore';
 import { sendError, sendSuccess } from '../utils/response.util';
-import { uploadRateLimiter } from '../middleware/rateLimit.middleware';
 
 // Configure Cloudinary (uses env: CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET)
 cloudinary.config({
@@ -31,7 +29,7 @@ export async function getSignedUploadUrl(req: Request, res: Response): Promise<v
     }
 
     const { resourceType, folder, publicId } = req.body;
-    
+
     if (!resourceType || !['image', 'video'].includes(resourceType)) {
       sendError(res, 'BAD_REQUEST', 'resourceType must be "image" or "video"', null, 400);
       return;
@@ -44,7 +42,7 @@ export async function getSignedUploadUrl(req: Request, res: Response): Promise<v
 
     // Generate timestamp for signature
     const timestamp = Math.round(new Date().getTime() / 1000);
-    
+
     // Build upload parameters
     const uploadParams: Record<string, any> = {
       timestamp,
@@ -90,7 +88,7 @@ export async function validateFileSize(req: Request, res: Response): Promise<voi
     }
 
     const { size, resourceType } = req.body;
-    
+
     if (!size || typeof size !== 'number') {
       sendError(res, 'BAD_REQUEST', 'File size is required', null, 400);
       return;
@@ -134,7 +132,7 @@ export async function getPlaybackUrl(req: Request, res: Response): Promise<void>
     }
 
     const { publicId, resourceType, transformations } = req.body;
-    
+
     if (!publicId || !resourceType) {
       sendError(res, 'BAD_REQUEST', 'publicId and resourceType are required', null, 400);
       return;
@@ -194,7 +192,7 @@ export async function deleteMedia(req: Request, res: Response): Promise<void> {
       sendError(res, 'UNAUTHORIZED', 'User not found', null, 401);
       return;
     }
-    
+
     const userData = userDoc.data();
     const role = (userData?.role || '').toLowerCase();
     const isAdmin = role === 'admin';

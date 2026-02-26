@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import React, { useRef, useState } from 'react';
 import {
@@ -22,7 +21,7 @@ import {
   View
 } from 'react-native';
 import { uploadImageToStorage } from '../lib/firebaseHelpers';
-import { auth, db } from '../lib/firebase';
+import { db } from '../lib/firebase';
 import {
   validateAddress,
   validateCity,
@@ -30,9 +29,10 @@ import {
   validatePassword,
   validatePhone,
   validateRequired,
-  normalizePhoneForAuth,
 } from '../lib/validations';
 import i18n from '../locales/i18n';
+import OtpModal from '../components/OtpModal';
+import { BACKEND_URL } from '../lib/config';
 
 function isValidTimeFormat(time: string): boolean {
   return /^([01]\d|2[0-3]):([0-5]\d)$/.test(time); // Matches HH:mm from 00:00 to 23:59
@@ -58,13 +58,15 @@ const SignupClinic = () => {
   const [city, setCity] = useState('');
   const [showCityModal, setShowCityModal] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
-  const [missing, setMissing] = useState<{[key: string]: boolean}>({});
+  const [missing, setMissing] = useState<{ [key: string]: boolean }>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpPhone, setOtpPhone] = useState('');
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  
+
   const cityOptions = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>).map(([key, label]) => ({ key, label }));
-  
-// Only store selected service keys (keep this one, remove duplicate below)
+
+  // Only store selected service keys (keep this one, remove duplicate below)
   const allServices = [
     { key: 'spa', label: i18n.t('spa') || 'Spa' },
     { key: 'sauna', label: i18n.t('sauna') || 'Sauna' },
@@ -89,7 +91,7 @@ const SignupClinic = () => {
   const [workingHours, setWorkingHours] = useState<Record<string, { from: string; to: string; doctors: string; off?: boolean }>>({});
   // Doctors list: array of { name: string, major?: string }
   const [doctors, setDoctors] = useState<{ name: string; major?: string; description?: string; photoUri?: string }[]>([]);
-  const [timePicker, setTimePicker] = useState<{visible: boolean, mode: 'from' | 'to', day: string | null}>({visible: false, mode: 'from', day: null});
+  const [timePicker, setTimePicker] = useState<{ visible: boolean, mode: 'from' | 'to', day: string | null }>({ visible: false, mode: 'from', day: null });
   const [tempTime, setTempTime] = useState(new Date());
 
   const [description, setDescription] = useState('');
@@ -106,14 +108,14 @@ const SignupClinic = () => {
 
   const validate = () => {
     const newErrors: Errors = {};
-    const newMissing: {[key: string]: boolean} = {};
-    
+    const newMissing: { [key: string]: boolean } = {};
+
     const clinicNameError = validateRequired(clinicName, i18n.t('clinic_name') || 'Clinic name');
     if (clinicNameError) {
       newErrors.clinicName = clinicNameError;
       newMissing.clinicName = true;
     }
-    
+
     // Email is optional - only validate if provided
     if (email && email.trim().length > 0) {
       const emailError = validateEmail(email);
@@ -122,61 +124,61 @@ const SignupClinic = () => {
         newMissing.email = true;
       }
     }
-    
+
     // Phone is now required
     const phoneError = validatePhone(phone);
     if (phoneError) {
       newErrors.phone = phoneError;
       newMissing.phone = true;
     }
-    
+
     const passwordError = validatePassword(password);
     if (passwordError) {
       newErrors.password = passwordError;
       newMissing.password = true;
     }
-    
+
     const cityError = validateCity(city);
     if (cityError) {
       newErrors.city = cityError;
       newMissing.city = true;
     }
-    
+
     const addressError = validateAddress(address);
     if (addressError) {
       newErrors.address = addressError;
       newMissing.address = true;
     }
-    
+
     const hasSelectedService = Object.values(services).some(s => s.selected);
     if (!hasSelectedService) {
       newErrors.services = i18n.t('atLeastOneServiceRequired') || 'At least one service must be selected';
       newMissing.services = true;
     }
-    
+
     // Validate that all selected services have fees
     const selectedServicesWithoutFees = Object.entries(services)
       .filter(([key, service]) => service.selected && (!service.fee || service.fee.trim() === ''))
       .map(([key]) => key);
-    
+
     if (selectedServicesWithoutFees.length > 0) {
       newErrors.services = i18n.t('feeRequiredForSelectedServices') || 'Fee is required for all selected services';
       newMissing.services = true;
     }
-    
+
     // Validate working hours - at least one day must be active with valid times
     const daysOfWeekList = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
     const activeDays = daysOfWeekList.filter(day => {
       const dayConfig = workingHours[day];
-      return dayConfig && !dayConfig.off && dayConfig.from && dayConfig.to && 
-             isValidTimeFormat(dayConfig.from) && isValidTimeFormat(dayConfig.to);
+      return dayConfig && !dayConfig.off && dayConfig.from && dayConfig.to &&
+        isValidTimeFormat(dayConfig.from) && isValidTimeFormat(dayConfig.to);
     });
-    
+
     if (activeDays.length === 0) {
       newErrors.workingHours = i18n.t('workingHoursRequired') || 'At least one day with working hours is required';
       newMissing.workingHours = true;
     }
-    
+
     setErrors(newErrors);
     setMissing(newMissing);
     return Object.keys(newErrors).length === 0;
@@ -199,83 +201,76 @@ const SignupClinic = () => {
     }
   };
 
-const handleSignup = async () => {
-  if (!validate()) {
-    Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
-    return;
-  }
-
-  try {
-    setLoading(true);
-    setFormError('');
-
-    // Step 1: Create Firebase Auth user
-    // Always use phone for Firebase Auth so user can login with the same number they registered with.
-    // Real email (if provided) is stored in Firestore for display/contact only.
-    const authEmail = `user_${normalizePhoneForAuth(phone)}@forsa.app`;
-    
-    const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
-    const user = userCredential.user;
-
-    // Step 2: Upload profile photo to Firebase Storage
-    let profilePhotoUrl = '';
-    if (profileImage) {
-      profilePhotoUrl = await uploadImageToStorage(
-        profileImage,
-        `users/${user.uid}/profile.jpg`
-      );
+  const handleSignup = async () => {
+    if (!validate()) {
+      Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
+      return;
     }
-
-    // Step 3: Prepare services data
-    const servicesData: { [key: string]: { selected: boolean; fee: string } } = {};
-    Object.entries(services).forEach(([key, val]) => {
-      servicesData[key] = { selected: val.selected, fee: val.fee || '' };
-    });
-
-    // Step 4: Save user data to Firestore
-    const userData = {
-      uid: user.uid,
-      role: 'clinic',
-      email: email && email.trim().length > 0 ? email.trim() : null,
-      phone: phone,
-      clinicName: clinicName,
-      city: city,
-      address: address,
-      description: description,
-      workingHours: normalizedHours,
-      doctors: doctors,
-      services: servicesData,
-      customServices: customServices,
-      profilePhoto: profilePhotoUrl,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    // Save to users collection
-    await setDoc(doc(db, 'users', user.uid), userData);
-
-    // Also save to role-specific collection
-    await setDoc(doc(db, 'clinics', user.uid), userData);
-
-    router.replace('/clinic-feed');
-  } catch (err: any) {
-    let errorMsg = i18n.t('signupFailedMessage');
-    if (err.code === 'auth/email-already-in-use') {
-      errorMsg = i18n.t('emailAlreadyRegistered');
-    } else if (err.code === 'auth/invalid-email') {
-      errorMsg = i18n.t('invalidEmailAddress');
-    } else if (err.code === 'auth/weak-password') {
-      errorMsg = i18n.t('weakPassword');
-    } else if (err.message) {
-      errorMsg = err.message;
+    try {
+      setLoading(true);
+      setFormError('');
+      const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
+      const otpRes = await fetch(`${BACKEND_URL}/api/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: normalizedPhone, role: 'clinic' }),
+      });
+      const otpData = await otpRes.json();
+      if (!otpRes.ok || !otpData.success) {
+        const msg = otpData.error?.message || 'Failed to send OTP';
+        setFormError(msg);
+        Alert.alert('Error', msg);
+        return;
+      }
+      setOtpPhone(normalizedPhone);
+      setShowOtpModal(true);
+    } catch (err: any) {
+      const msg = err.message || i18n.t('signupFailedMessage');
+      setFormError(msg);
+      Alert.alert(i18n.t('signupFailed'), msg);
+    } finally {
+      setLoading(false);
     }
-    console.error('❌ Signup error:', err);
-    setFormError(errorMsg);
-    Alert.alert(i18n.t('signupFailed'), errorMsg);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
+
+  const handleOtpVerified = async (uid: string, _token: string, _refreshToken: string) => {
+    setShowOtpModal(false);
+    try {
+      setLoading(true);
+      let profilePhotoUrl = '';
+      if (profileImage) {
+        profilePhotoUrl = await uploadImageToStorage(profileImage, `users/${uid}/profile.jpg`);
+      }
+      const servicesData: { [key: string]: { selected: boolean; fee: string } } = {};
+      Object.entries(services).forEach(([key, val]) => {
+        servicesData[key] = { selected: val.selected, fee: val.fee || '' };
+      });
+      const userData = {
+        uid,
+        role: 'clinic',
+        email: email && email.trim().length > 0 ? email.trim() : null,
+        phone,
+        clinicName,
+        city,
+        address,
+        description,
+        workingHours: normalizedHours,
+        doctors,
+        services: servicesData,
+        customServices,
+        profilePhoto: profilePhotoUrl,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await setDoc(doc(db, 'users', uid), userData, { merge: true });
+      await setDoc(doc(db, 'clinics', uid), userData);
+      router.replace('/clinic-feed');
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to save profile data');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleServiceToggle = (key: string) => {
     setServices((prev) => ({
@@ -318,19 +313,29 @@ const handleSignup = async () => {
         style={styles.gradient}
       >
         <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+          {/* OTP Modal */}
+          <OtpModal
+            visible={showOtpModal}
+            phone={otpPhone}
+            password={password}
+            role="clinic"
+            email={email && email.trim().length > 0 ? email.trim() : undefined}
+            onClose={() => setShowOtpModal(false)}
+            onVerified={handleOtpVerified}
+          />
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.backButton} onPress={handleBack}>
               <Ionicons name="arrow-back" size={24} color="#fff" />
             </TouchableOpacity>
             <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>{i18n.t('signup_clinic')}</Text>
-            <Text style={styles.headerSubtitle}>{i18n.t('createYourClinicAccount') || 'Create your clinic account'}</Text>
+              <Text style={styles.headerTitle}>{i18n.t('signup_clinic')}</Text>
+              <Text style={styles.headerSubtitle}>{i18n.t('createYourClinicAccount') || 'Create your clinic account'}</Text>
             </View>
           </View>
 
-          <ScrollView 
-            contentContainerStyle={styles.scrollContent} 
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
@@ -372,7 +377,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={clinicName}
-                    onChangeText={t => { setClinicName(t); if (missing.clinicName) setMissing(m => ({...m, clinicName: false})); }}
+                    onChangeText={t => { setClinicName(t); if (missing.clinicName) setMissing(m => ({ ...m, clinicName: false })); }}
                     autoCapitalize="words"
                     placeholder={i18n.t('clinic_name_ph') || i18n.t('clinic_name')}
                     placeholderTextColor="#999"
@@ -391,7 +396,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={phone}
-                    onChangeText={t => { setPhone(t); if (missing.phone) setMissing(m => ({...m, phone: false})); }}
+                    onChangeText={t => { setPhone(t); if (missing.phone) setMissing(m => ({ ...m, phone: false })); }}
                     keyboardType="phone-pad"
                     placeholder={i18n.t('phone_ph')}
                     placeholderTextColor="#999"
@@ -409,9 +414,9 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={email}
-                    onChangeText={t => { 
-                      setEmail(t); 
-                      if (missing.email) setMissing(m => ({...m, email: false})); 
+                    onChangeText={t => {
+                      setEmail(t);
+                      if (missing.email) setMissing(m => ({ ...m, email: false }));
                       // Clear error if field is empty (since it's optional)
                       if (!t || t.trim().length === 0) {
                         setErrors(prev => {
@@ -445,7 +450,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={password}
-                    onChangeText={t => { setPassword(t); if (missing.password) setMissing(m => ({...m, password: false})); }}
+                    onChangeText={t => { setPassword(t); if (missing.password) setMissing(m => ({ ...m, password: false })); }}
                     secureTextEntry
                     placeholder={i18n.t('password_ph')}
                     placeholderTextColor="#999"
@@ -486,7 +491,7 @@ const handleSignup = async () => {
                             style={[styles.cityOption, city === option.key && styles.cityOptionSelected]}
                             onPress={() => {
                               setCity(option.key);
-                              if (missing.city) setMissing(m => ({...m, city: false}));
+                              if (missing.city) setMissing(m => ({ ...m, city: false }));
                               setShowCityModal(false);
                             }}
                           >
@@ -495,9 +500,9 @@ const handleSignup = async () => {
                             </Text>
                             {city === option.key && <Ionicons name="checkmark" size={20} color="#fff" />}
                           </TouchableOpacity>
-                    ))}
+                        ))}
                       </ScrollView>
-                </View>
+                    </View>
                   </TouchableOpacity>
                 </Modal>
               </View>
@@ -512,7 +517,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={address}
-                    onChangeText={t => { setAddress(t); if (missing.address) setMissing(m => ({...m, address: false})); }}
+                    onChangeText={t => { setAddress(t); if (missing.address) setMissing(m => ({ ...m, address: false })); }}
                     autoCapitalize="words"
                     placeholder={i18n.t('address_ph')}
                     placeholderTextColor="#999"
@@ -551,7 +556,7 @@ const handleSignup = async () => {
                         <TouchableOpacity
                           onPress={() => {
                             handleServiceToggle(key);
-                            if (missing.services) setMissing(m => ({...m, services: false}));
+                            if (missing.services) setMissing(m => ({ ...m, services: false }));
                           }}
                           style={[styles.checkbox, selected && styles.checkboxSelected]}
                         >
@@ -569,7 +574,7 @@ const handleSignup = async () => {
                               [key]: { ...prev[key], fee: val },
                             }));
                             // Clear fee error when user starts typing
-                            if (missing.services) setMissing(m => ({...m, services: false}));
+                            if (missing.services) setMissing(m => ({ ...m, services: false }));
                           }}
                           style={[
                             styles.feeInput,
@@ -591,7 +596,7 @@ const handleSignup = async () => {
                 </Text>
                 <WorkingHoursInput value={workingHours} onChange={(v) => {
                   setWorkingHours(v);
-                  if (missing.workingHours) setMissing(m => ({...m, workingHours: false}));
+                  if (missing.workingHours) setMissing(m => ({ ...m, workingHours: false }));
                 }} />
                 {errors.workingHours && <Text style={styles.errorText}>{errors.workingHours}</Text>}
               </View>
@@ -601,75 +606,75 @@ const handleSignup = async () => {
                   {i18n.t('doctors')} <Text style={{ color: '#888', fontSize: 13 }}>({i18n.t('optional') || 'optional'})</Text>
                 </Text>
                 <View style={{ width: '100%', marginBottom: 16 }}>
-          {doctors.length > 0 && (
-            <View style={{ flexDirection: 'row', marginBottom: 4 }}>
-              <Text style={{ flex: 2, fontWeight: '600', color: '#111', fontSize: 14, marginRight: 8 }}>{i18n.t('doctor_name') || 'Name'}</Text>
-              <Text style={{ flex: 2, fontWeight: '600', color: '#111', fontSize: 14, marginRight: 8 }}>{i18n.t('doctor_major') || 'Speciality'}</Text>
-              <View style={{ width: 24 }} />
-            </View>
-          )}
-          {doctors.map((doc, idx) => (
-            <View key={idx} style={{ marginBottom: 14, backgroundColor: '#fafbfc', borderRadius: 10, borderWidth: 1, borderColor: '#eee', padding: 10 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                <TextInput
-                  style={{ flex: 2, borderWidth: 1, borderColor: '#ccc', borderRadius: 6, padding: 8, fontSize: 15, marginRight: 8, backgroundColor: '#fff' }}
-                  placeholder={i18n.t('doctor_name') || 'Doctor Name'}
-                  value={doc.name}
-                  onChangeText={v => setDoctors(prev => prev.map((d, i) => i === idx ? { ...d, name: v } : d))}
-                />
-                <TextInput
-                  style={{ flex: 2, borderWidth: 1, borderColor: '#ccc', borderRadius: 6, padding: 8, fontSize: 15, marginRight: 8, backgroundColor: '#fff' }}
-                  placeholder={i18n.t('doctor_major') || 'Major (optional)'}
-                  value={doc.major || ''}
-                  onChangeText={v => setDoctors(prev => prev.map((d, i) => i === idx ? { ...d, major: v } : d))}
-                />
-                <TouchableOpacity onPress={() => setDoctors(prev => prev.filter((_, i) => i !== idx))} style={{ padding: 6, backgroundColor: '#eee', borderRadius: 6 }}>
-                  <Text style={{ color: '#e00', fontWeight: 'bold', fontSize: 18 }}>×</Text>
-                </TouchableOpacity>
-              </View>
-              {/* Doctor Photo Picker */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                {doc.photoUri ? (
-                  <Image source={{ uri: doc.photoUri }} style={{ width: 56, height: 56, borderRadius: 28, borderWidth: 1, borderColor: '#bbb', marginRight: 10 }} />
-                ) : (
-                  <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: '#eee', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#bbb', marginRight: 10 }}>
-                    <Text style={{ color: '#888', fontSize: 24 }}>+</Text>
-                  </View>
-                )}
-                <TouchableOpacity
-                  onPress={async () => {
-                    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-                    if (status !== 'granted') {
-                      Alert.alert(i18n.t('permissionDenied') || 'Permission denied', i18n.t('mediaLibraryPermissionRequired') || 'Media library permission is required.');
-                      return;
-                    }
-                    const result = await ImagePicker.launchImageLibraryAsync({
-                      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                      allowsEditing: true,
-                      aspect: [1, 1],
-                      quality: 0.7,
-                    });
-                    if (!result.canceled && result.assets && result.assets.length > 0) {
-                      setDoctors(prev => prev.map((d, i) => i === idx ? { ...d, photoUri: result.assets[0].uri } : d));
-                    }
-                  }}
-                  style={{ paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#f4f4f4', borderRadius: 8 }}
-                >
-                  <Text style={{ color: '#111', fontWeight: 'bold', fontSize: 14 }}>{i18n.t('add_profile_picture') || 'Add Photo'}</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={{ fontWeight: '600', color: '#111', fontSize: 14, marginBottom: 4 }}>
-                {i18n.t('doctor_description_title') || 'Doctor Description (optional)'}
-              </Text>
-              <TextInput
-                style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 6, padding: 8, fontSize: 15, backgroundColor: '#fff', minHeight: 40, textAlignVertical: 'top' }}
-                placeholder={i18n.t('doctor_description') || 'Doctor Description (optional)'}
-                value={doc.description || ''}
-                multiline
-                onChangeText={v => setDoctors(prev => prev.map((d, i) => i === idx ? { ...d, description: v } : d))}
-              />
-            </View>
-          ))}
+                  {doctors.length > 0 && (
+                    <View style={{ flexDirection: 'row', marginBottom: 4 }}>
+                      <Text style={{ flex: 2, fontWeight: '600', color: '#111', fontSize: 14, marginRight: 8 }}>{i18n.t('doctor_name') || 'Name'}</Text>
+                      <Text style={{ flex: 2, fontWeight: '600', color: '#111', fontSize: 14, marginRight: 8 }}>{i18n.t('doctor_major') || 'Speciality'}</Text>
+                      <View style={{ width: 24 }} />
+                    </View>
+                  )}
+                  {doctors.map((doc, idx) => (
+                    <View key={idx} style={{ marginBottom: 14, backgroundColor: '#fafbfc', borderRadius: 10, borderWidth: 1, borderColor: '#eee', padding: 10 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                        <TextInput
+                          style={{ flex: 2, borderWidth: 1, borderColor: '#ccc', borderRadius: 6, padding: 8, fontSize: 15, marginRight: 8, backgroundColor: '#fff' }}
+                          placeholder={i18n.t('doctor_name') || 'Doctor Name'}
+                          value={doc.name}
+                          onChangeText={v => setDoctors(prev => prev.map((d, i) => i === idx ? { ...d, name: v } : d))}
+                        />
+                        <TextInput
+                          style={{ flex: 2, borderWidth: 1, borderColor: '#ccc', borderRadius: 6, padding: 8, fontSize: 15, marginRight: 8, backgroundColor: '#fff' }}
+                          placeholder={i18n.t('doctor_major') || 'Major (optional)'}
+                          value={doc.major || ''}
+                          onChangeText={v => setDoctors(prev => prev.map((d, i) => i === idx ? { ...d, major: v } : d))}
+                        />
+                        <TouchableOpacity onPress={() => setDoctors(prev => prev.filter((_, i) => i !== idx))} style={{ padding: 6, backgroundColor: '#eee', borderRadius: 6 }}>
+                          <Text style={{ color: '#e00', fontWeight: 'bold', fontSize: 18 }}>×</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {/* Doctor Photo Picker */}
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                        {doc.photoUri ? (
+                          <Image source={{ uri: doc.photoUri }} style={{ width: 56, height: 56, borderRadius: 28, borderWidth: 1, borderColor: '#bbb', marginRight: 10 }} />
+                        ) : (
+                          <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: '#eee', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#bbb', marginRight: 10 }}>
+                            <Text style={{ color: '#888', fontSize: 24 }}>+</Text>
+                          </View>
+                        )}
+                        <TouchableOpacity
+                          onPress={async () => {
+                            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                            if (status !== 'granted') {
+                              Alert.alert(i18n.t('permissionDenied') || 'Permission denied', i18n.t('mediaLibraryPermissionRequired') || 'Media library permission is required.');
+                              return;
+                            }
+                            const result = await ImagePicker.launchImageLibraryAsync({
+                              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                              allowsEditing: true,
+                              aspect: [1, 1],
+                              quality: 0.7,
+                            });
+                            if (!result.canceled && result.assets && result.assets.length > 0) {
+                              setDoctors(prev => prev.map((d, i) => i === idx ? { ...d, photoUri: result.assets[0].uri } : d));
+                            }
+                          }}
+                          style={{ paddingVertical: 8, paddingHorizontal: 14, backgroundColor: '#f4f4f4', borderRadius: 8 }}
+                        >
+                          <Text style={{ color: '#111', fontWeight: 'bold', fontSize: 14 }}>{i18n.t('add_profile_picture') || 'Add Photo'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={{ fontWeight: '600', color: '#111', fontSize: 14, marginBottom: 4 }}>
+                        {i18n.t('doctor_description_title') || 'Doctor Description (optional)'}
+                      </Text>
+                      <TextInput
+                        style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 6, padding: 8, fontSize: 15, backgroundColor: '#fff', minHeight: 40, textAlignVertical: 'top' }}
+                        placeholder={i18n.t('doctor_description') || 'Doctor Description (optional)'}
+                        value={doc.description || ''}
+                        multiline
+                        onChangeText={v => setDoctors(prev => prev.map((d, i) => i === idx ? { ...d, description: v } : d))}
+                      />
+                    </View>
+                  ))}
                   <TouchableOpacity onPress={() => setDoctors(prev => [...prev, { name: '', major: '' }])} style={{ padding: 10, backgroundColor: '#f4f4f4', borderRadius: 8, alignItems: 'center', marginTop: 4 }}>
                     <Text style={{ color: '#111', fontWeight: 'bold', fontSize: 15 }}>+ {i18n.t('add_doctor') || 'Add Doctor'}</Text>
                   </TouchableOpacity>
@@ -1046,7 +1051,7 @@ const WorkingHoursInput: React.FC<WorkingHoursInputProps> = ({ value, onChange }
             activeOpacity={0.7}
             disabled={!!value[day]?.off}
           >
-           <Text style={{ color: '#111', fontSize: 14 }}>{getDisplayTime(day, 'from')}</Text>
+            <Text style={{ color: '#111', fontSize: 14 }}>{getDisplayTime(day, 'from')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={{
@@ -1064,7 +1069,7 @@ const WorkingHoursInput: React.FC<WorkingHoursInputProps> = ({ value, onChange }
             activeOpacity={0.7}
             disabled={!!value[day]?.off}
           >
-           <Text style={{ color: '#111', fontSize: 14 }}>{getDisplayTime(day, 'to')}</Text>
+            <Text style={{ color: '#111', fontSize: 14 }}>{getDisplayTime(day, 'to')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => onChange({ ...value, [day]: { ...value[day], off: !value[day]?.off } })}

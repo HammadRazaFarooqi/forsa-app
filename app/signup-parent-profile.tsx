@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import React, { useRef, useState } from 'react';
 import {
@@ -20,16 +19,17 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { auth, db } from '../lib/firebase';
+import { db } from '../lib/firebase';
 import {
   validateCity,
   validateEmail,
   validateName,
   validatePassword,
   validatePhone,
-  normalizePhoneForAuth,
 } from '../lib/validations';
 import i18n from '../locales/i18n';
+import OtpModal from '../components/OtpModal';
+import { BACKEND_URL } from '../lib/config';
 
 const cities = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>);
 
@@ -58,8 +58,10 @@ const SignupParent = () => {
   const [showCityModal, setShowCityModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Errors>({});
-  const [missing, setMissing] = useState<{[key: string]: boolean}>({});
+  const [missing, setMissing] = useState<{ [key: string]: boolean }>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpPhone, setOtpPhone] = useState('');
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
@@ -81,14 +83,14 @@ const SignupParent = () => {
 
   const validate = () => {
     const newErrors: Errors = {};
-    const newMissing: {[key: string]: boolean} = {};
-    
+    const newMissing: { [key: string]: boolean } = {};
+
     const parentNameError = validateName(parentName, 'Parent name');
     if (parentNameError) {
       newErrors.parentName = parentNameError;
       newMissing.parentName = true;
     }
-    
+
     // Email is optional - only validate if provided
     if (email && email.trim().length > 0) {
       const emailError = validateEmail(email);
@@ -97,20 +99,20 @@ const SignupParent = () => {
         newMissing.email = true;
       }
     }
-    
+
     // Phone is now required
     const phoneError = validatePhone(phone);
     if (phoneError) {
       newErrors.phone = phoneError;
       newMissing.phone = true;
     }
-    
+
     const passwordError = validatePassword(password);
     if (passwordError) {
       newErrors.password = passwordError;
       newMissing.password = true;
     }
-    
+
     if (!confirmPassword) {
       newErrors.confirmPassword = i18n.t('confirm_password_required') || 'Confirm password is required';
       newMissing.confirmPassword = true;
@@ -118,13 +120,13 @@ const SignupParent = () => {
       newErrors.confirmPassword = i18n.t('password_mismatch') || 'Passwords do not match';
       newMissing.confirmPassword = true;
     }
-    
+
     const cityError = validateCity(city);
     if (cityError) {
       newErrors.city = cityError;
       newMissing.city = true;
     }
-    
+
     if (!children[0] || children.some((c) => !c.trim())) {
       newErrors.children = 'At least one child name is required';
       newMissing.children = true;
@@ -133,84 +135,75 @@ const SignupParent = () => {
       newErrors.childAges = 'At least one child age is required';
       newMissing.childAges = true;
     }
-    
+
     setErrors(newErrors);
     setMissing(newMissing);
     return Object.keys(newErrors).length === 0;
   };
 
-const handleSignup = async () => {
-  if (!validate()) {
-    Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
-    return;
-  }
-
-  try {
-    setLoading(true);
-    setFormError('');
-
-    // Step 1: Create Firebase Auth user
-    // Always use phone for Firebase Auth so user can login with the same number they registered with.
-    // Real email (if provided) is stored in Firestore for display/contact only.
-    const authEmail = `user_${normalizePhoneForAuth(phone)}@forsa.app`;
-    
-    const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
-    const user = userCredential.user;
-
-    // Step 2: Prepare children data
-    const childrenData = children.map((name, idx) => ({
-      name: name.trim(),
-      age: childAges[idx] || '',
-    })).filter(child => child.name && child.age);
-
-    // Step 3: Save user data to Firestore
-    const userData = {
-      uid: user.uid,
-      role: 'parent',
-      email: email && email.trim().length > 0 ? email.trim() : null,
-      phone: phone,
-      parentName: parentName,
-      city: city,
-      children: childrenData,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    // Save to users collection
-    await setDoc(doc(db, 'users', user.uid), userData);
-
-    // Also save to role-specific collection
-    await setDoc(doc(db, 'parents', user.uid), userData);
-
-    // Generate check-in code for parent (non-blocking)
+  const handleSignup = async () => {
+    if (!validate()) {
+      Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
+      return;
+    }
     try {
-      const { ensureCheckInCodeForCurrentUser } = await import('../services/CheckInCodeService');
-      await ensureCheckInCodeForCurrentUser();
-    } catch (error) {
-      console.error('Error generating check-in code (non-critical):', error);
-      // Don't block signup if code generation fails - will be generated on next app launch
+      setLoading(true);
+      setFormError('');
+      const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
+      const otpRes = await fetch(`${BACKEND_URL}/api/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: normalizedPhone, role: 'parent' }),
+      });
+      const otpData = await otpRes.json();
+      if (!otpRes.ok || !otpData.success) {
+        const msg = otpData.error?.message || 'Failed to send OTP';
+        setFormError(msg);
+        Alert.alert('Error', msg);
+        return;
+      }
+      setOtpPhone(normalizedPhone);
+      setShowOtpModal(true);
+    } catch (err: any) {
+      const msg = err.message || i18n.t('signupFailedMessage');
+      setFormError(msg);
+      Alert.alert(i18n.t('signupFailed'), msg);
+    } finally {
+      setLoading(false);
     }
+  };
 
-    Alert.alert(i18n.t('signupSuccessful'));
-    router.replace('/parent-feed');
-  } catch (err: any) {
-    let errorMsg = i18n.t('signupFailedMessage');
-    if (err.code === 'auth/email-already-in-use') {
-      errorMsg = i18n.t('emailAlreadyRegistered');
-    } else if (err.code === 'auth/invalid-email') {
-      errorMsg = i18n.t('invalidEmailAddress');
-    } else if (err.code === 'auth/weak-password') {
-      errorMsg = i18n.t('weakPassword');
-    } else if (err.message) {
-      errorMsg = err.message;
+  const handleOtpVerified = async (uid: string, _token: string, _refreshToken: string) => {
+    setShowOtpModal(false);
+    try {
+      setLoading(true);
+      const childrenData = children
+        .map((name, idx) => ({ name: name.trim(), age: childAges[idx] || '' }))
+        .filter(c => c.name && c.age);
+      const userData = {
+        uid,
+        role: 'parent',
+        email: email && email.trim().length > 0 ? email.trim() : null,
+        phone,
+        parentName,
+        city,
+        children: childrenData,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await setDoc(doc(db, 'users', uid), userData, { merge: true });
+      await setDoc(doc(db, 'parents', uid), userData);
+      try {
+        const { ensureCheckInCodeForCurrentUser } = await import('../services/CheckInCodeService');
+        await ensureCheckInCodeForCurrentUser();
+      } catch { }
+      router.replace('/parent-feed');
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to save profile data');
+    } finally {
+      setLoading(false);
     }
-    console.error('❌ Signup error:', err);
-    setFormError(errorMsg);
-    Alert.alert('Error', errorMsg);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
 
 
@@ -246,19 +239,29 @@ const handleSignup = async () => {
         style={styles.gradient}
       >
         <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+          {/* OTP Modal */}
+          <OtpModal
+            visible={showOtpModal}
+            phone={otpPhone}
+            password={password}
+            role="parent"
+            email={email && email.trim().length > 0 ? email.trim() : undefined}
+            onClose={() => setShowOtpModal(false)}
+            onVerified={handleOtpVerified}
+          />
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.backButton} onPress={handleBack}>
               <Ionicons name="arrow-back" size={24} color="#fff" />
             </TouchableOpacity>
             <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>{i18n.t('signup_parent')}</Text>
-            <Text style={styles.headerSubtitle}>{i18n.t('createYourParentAccount') || 'Create your parent account'}</Text>
+              <Text style={styles.headerTitle}>{i18n.t('signup_parent')}</Text>
+              <Text style={styles.headerSubtitle}>{i18n.t('createYourParentAccount') || 'Create your parent account'}</Text>
             </View>
           </View>
 
-          <ScrollView 
-            contentContainerStyle={styles.scrollContent} 
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
@@ -281,7 +284,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={parentName}
-                    onChangeText={t => { setParentName(t); if (missing.parentName) setMissing(m => ({...m, parentName: false})); }}
+                    onChangeText={t => { setParentName(t); if (missing.parentName) setMissing(m => ({ ...m, parentName: false })); }}
                     autoCapitalize="words"
                     placeholder={i18n.t('parent_name_ph')}
                     placeholderTextColor="#999"
@@ -300,7 +303,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={phone}
-                    onChangeText={t => { setPhone(t); if (missing.phone) setMissing(m => ({...m, phone: false})); }}
+                    onChangeText={t => { setPhone(t); if (missing.phone) setMissing(m => ({ ...m, phone: false })); }}
                     keyboardType="phone-pad"
                     placeholder={i18n.t('phone_ph')}
                     placeholderTextColor="#999"
@@ -318,9 +321,9 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={email}
-                    onChangeText={t => { 
-                      setEmail(t); 
-                      if (missing.email) setMissing(m => ({...m, email: false})); 
+                    onChangeText={t => {
+                      setEmail(t);
+                      if (missing.email) setMissing(m => ({ ...m, email: false }));
                       // Clear error if field is empty (since it's optional)
                       if (!t || t.trim().length === 0) {
                         setErrors(prev => {
@@ -354,7 +357,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={password}
-                    onChangeText={t => { setPassword(t); if (missing.password) setMissing(m => ({...m, password: false})); }}
+                    onChangeText={t => { setPassword(t); if (missing.password) setMissing(m => ({ ...m, password: false })); }}
                     secureTextEntry
                     placeholder={i18n.t('password_ph')}
                     placeholderTextColor="#999"
@@ -373,7 +376,7 @@ const handleSignup = async () => {
                   <TextInput
                     style={styles.input}
                     value={confirmPassword}
-                    onChangeText={t => { setConfirmPassword(t); if (missing.confirmPassword) setMissing(m => ({...m, confirmPassword: false})); }}
+                    onChangeText={t => { setConfirmPassword(t); if (missing.confirmPassword) setMissing(m => ({ ...m, confirmPassword: false })); }}
                     secureTextEntry
                     placeholder={i18n.t('confirm_password_placeholder') || i18n.t('confirm_password_ph') || 'Confirm your password'}
                     placeholderTextColor="#999"
@@ -398,7 +401,7 @@ const handleSignup = async () => {
                   <Ionicons name="chevron-down" size={20} color="#999" />
                 </TouchableOpacity>
                 {errors.city && <Text style={styles.errorText}>{errors.city}</Text>}
-                
+
                 {/* City Selection Modal */}
                 <Modal
                   visible={showCityModal}
@@ -419,13 +422,13 @@ const handleSignup = async () => {
                         </TouchableOpacity>
                       </View>
                       <ScrollView style={styles.modalScrollView} showsVerticalScrollIndicator={true}>
-                    {cities.map(([key, label]) => (
+                        {cities.map(([key, label]) => (
                           <TouchableOpacity
                             key={key}
                             style={[styles.cityOption, city === key && styles.cityOptionSelected]}
                             onPress={() => {
                               setCity(key);
-                              if (missing.city) setMissing(m => ({...m, city: false}));
+                              if (missing.city) setMissing(m => ({ ...m, city: false }));
                               setShowCityModal(false);
                             }}
                           >
@@ -438,7 +441,7 @@ const handleSignup = async () => {
                           </TouchableOpacity>
                         ))}
                       </ScrollView>
-                </View>
+                    </View>
                   </TouchableOpacity>
                 </Modal>
               </View>

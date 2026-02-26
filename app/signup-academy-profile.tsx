@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import React, { useState } from 'react';
 import {
@@ -22,7 +21,7 @@ import {
   View
 } from 'react-native';
 import { uploadImageToStorage } from '../lib/firebaseHelpers';
-import { auth, db } from '../lib/firebase';
+import { db } from '../lib/firebase';
 import {
   validateAddress,
   validateCity,
@@ -30,9 +29,10 @@ import {
   validatePassword,
   validatePhone,
   validateRequired,
-  normalizePhoneForAuth,
 } from '../lib/validations';
 import i18n from '../locales/i18n';
+import OtpModal from '../components/OtpModal';
+import { BACKEND_URL } from '../lib/config';
 
 const SignupAcademy = () => {
   const router = useRouter();
@@ -49,11 +49,13 @@ const SignupAcademy = () => {
   const [fees, setFees] = useState<{ [age: string]: string }>({});
   const [selectedAge, setSelectedAge] = useState<string | null>(null);
   const [profileImage, setProfileImage] = useState<string | null>(null);
-  const [missing, setMissing] = useState<{[key: string]: boolean}>({});
-  const [errors, setErrors] = useState<{[key: string]: string}>({});
+  const [missing, setMissing] = useState<{ [key: string]: boolean }>({});
+  const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpPhone, setOtpPhone] = useState('');
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
-  
+
   const cityOptions = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>).map(([key, label]) => ({ key, label }));
 
   const ageGroups = Array.from({ length: 10 }, (_, i) => (7 + i).toString());
@@ -91,15 +93,15 @@ const SignupAcademy = () => {
   const handleBack = () => router.back();
 
   const validate = () => {
-    const newErrors: {[key: string]: string} = {};
-    const newMissing: {[key: string]: boolean} = {};
-    
+    const newErrors: { [key: string]: string } = {};
+    const newMissing: { [key: string]: boolean } = {};
+
     const academyNameError = validateRequired(academyName, i18n.t('academy_name') || 'Academy name');
     if (academyNameError) {
       newErrors.academyName = academyNameError;
       newMissing.academyName = true;
     }
-    
+
     // Email is optional - only validate if provided
     if (email && email.trim().length > 0) {
       const emailError = validateEmail(email);
@@ -108,110 +110,104 @@ const SignupAcademy = () => {
         newMissing.email = true;
       }
     }
-    
+
     // Phone is now required
     const phoneError = validatePhone(phone);
     if (phoneError) {
       newErrors.phone = phoneError;
       newMissing.phone = true;
     }
-    
+
     const passwordError = validatePassword(password);
     if (passwordError) {
       newErrors.password = passwordError;
       newMissing.password = true;
     }
-    
+
     const cityError = validateCity(city);
     if (cityError) {
       newErrors.city = cityError;
       newMissing.city = true;
     }
-    
+
     const addressError = validateAddress(address);
     if (addressError) {
       newErrors.address = addressError;
       newMissing.address = true;
     }
-    
+
     // Profile photo is optional
-    
+
     // Check that at least one fee is entered
     if (!Object.values(fees).some((v) => v && v.trim() !== '')) {
       newErrors.fees = i18n.t('atLeastOneFeeRequired') || 'At least one fee must be entered';
       newMissing.fees = true;
     }
-    
+
     setErrors(newErrors);
     setMissing(newMissing);
     return Object.keys(newErrors).length === 0;
   };
 
- const handleSignup = async () => {
-  if (!validate()) {
-    Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
-    return;
-  }
-
-  try {
+  const handleSignup = async () => {
+    if (!validate()) {
+      Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
+      return;
+    }
+    try {
       setLoading(true);
       setFormError('');
-
-      // Step 1: Create Firebase Auth user
-      // Always use phone for Firebase Auth so user can login with the same number they registered with.
-      // Real email (if provided) is stored in Firestore for display/contact only.
-      const authEmail = `user_${normalizePhoneForAuth(phone)}@forsa.app`;
-      
-      const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
-      const user = userCredential.user;
-
-      // Step 2: Upload profile photo to Firebase Storage
-      let profilePhotoUrl = '';
-    if (profileImage) {
-        profilePhotoUrl = await uploadImageToStorage(
-          profileImage,
-          `users/${user.uid}/profile.jpg`
-        );
+      const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
+      const otpRes = await fetch(`${BACKEND_URL}/api/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: normalizedPhone, role: 'academy' }),
+      });
+      const otpData = await otpRes.json();
+      if (!otpRes.ok || !otpData.success) {
+        const msg = otpData.error?.message || 'Failed to send OTP';
+        setFormError(msg);
+        Alert.alert('Error', msg);
+        return;
       }
+      setOtpPhone(normalizedPhone);
+      setShowOtpModal(true);
+    } catch (err: any) {
+      const msg = err.message || i18n.t('signupFailedMessage');
+      setFormError(msg);
+      Alert.alert(i18n.t('signupFailed'), msg);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      // Step 3: Save user data to Firestore
+  const handleOtpVerified = async (uid: string, _token: string, _refreshToken: string) => {
+    setShowOtpModal(false);
+    try {
+      setLoading(true);
+      let profilePhotoUrl = '';
+      if (profileImage) {
+        profilePhotoUrl = await uploadImageToStorage(profileImage, `users/${uid}/profile.jpg`);
+      }
       const userData = {
-        uid: user.uid,
+        uid,
         role: 'academy',
         email: email && email.trim().length > 0 ? email.trim() : null,
-        phone: phone,
-        academyName: academyName,
-        city: city,
-        address: address,
-        description: description,
-        fees: fees,
+        phone,
+        academyName,
+        city,
+        address,
+        description,
+        fees,
         profilePhoto: profilePhotoUrl,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-
-      // Save to users collection
-      await setDoc(doc(db, 'users', user.uid), userData);
-
-      // Also save to role-specific collection
-      await setDoc(doc(db, 'academies', user.uid), userData);
-
-      // Navigate
+      await setDoc(doc(db, 'users', uid), userData, { merge: true });
+      await setDoc(doc(db, 'academies', uid), userData);
       router.replace('/academy-feed');
-    } catch (error: any) {
-      let errorMsg = i18n.t('signupFailedMessage');
-      if (error.code === 'auth/email-already-in-use') {
-        errorMsg = i18n.t('emailAlreadyRegistered');
-      } else if (error.code === 'auth/invalid-email') {
-        errorMsg = i18n.t('invalidEmailAddress');
-      } else if (error.code === 'auth/weak-password') {
-        errorMsg = i18n.t('weakPassword');
-      } else if (error.message) {
-        errorMsg = error.message;
-      }
-      console.error('❌ Signup error:', error);
-      setFormError(errorMsg);
-      Alert.alert(i18n.t('signupFailed'), errorMsg);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to save profile data');
     } finally {
       setLoading(false);
     }
@@ -225,19 +221,29 @@ const SignupAcademy = () => {
         style={styles.gradient}
       >
         <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+          {/* OTP Modal */}
+          <OtpModal
+            visible={showOtpModal}
+            phone={otpPhone}
+            password={password}
+            role="academy"
+            email={email && email.trim().length > 0 ? email.trim() : undefined}
+            onClose={() => setShowOtpModal(false)}
+            onVerified={handleOtpVerified}
+          />
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.backButton} onPress={handleBack}>
               <Ionicons name="arrow-back" size={24} color="#fff" />
             </TouchableOpacity>
             <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>{i18n.t('signup_academy')}</Text>
-            <Text style={styles.headerSubtitle}>{i18n.t('createYourAcademyAccount')}</Text>
+              <Text style={styles.headerTitle}>{i18n.t('signup_academy')}</Text>
+              <Text style={styles.headerSubtitle}>{i18n.t('createYourAcademyAccount')}</Text>
             </View>
           </View>
 
-          <ScrollView 
-            contentContainerStyle={styles.scrollContent} 
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
@@ -251,7 +257,7 @@ const SignupAcademy = () => {
             {/* Profile Picture Picker */}
             <View style={styles.profileSection}>
               <TouchableOpacity onPress={pickImage} style={styles.profileImageContainer}>
-              {profileImage ? (
+                {profileImage ? (
                   <Image source={{ uri: profileImage }} style={styles.profileImage} />
                 ) : (
                   <View style={styles.profileImagePlaceholder}>
@@ -278,7 +284,7 @@ const SignupAcademy = () => {
                   <TextInput
                     style={styles.input}
                     value={academyName}
-                    onChangeText={t => { setAcademyName(t); if (missing.academyName) setMissing(m => ({...m, academyName: false})); }}
+                    onChangeText={t => { setAcademyName(t); if (missing.academyName) setMissing(m => ({ ...m, academyName: false })); }}
                     autoCapitalize="words"
                     placeholder={i18n.t('academy_name_placeholder')}
                     placeholderTextColor="#999"
@@ -297,7 +303,7 @@ const SignupAcademy = () => {
                   <TextInput
                     style={styles.input}
                     value={phone}
-                    onChangeText={t => { setPhone(t); if (missing.phone) setMissing(m => ({...m, phone: false})); }}
+                    onChangeText={t => { setPhone(t); if (missing.phone) setMissing(m => ({ ...m, phone: false })); }}
                     keyboardType="phone-pad"
                     placeholder={i18n.t('phone_placeholder') || i18n.t('phone_ph')}
                     placeholderTextColor="#999"
@@ -315,9 +321,9 @@ const SignupAcademy = () => {
                   <TextInput
                     style={styles.input}
                     value={email}
-                    onChangeText={t => { 
-                      setEmail(t); 
-                      if (missing.email) setMissing(m => ({...m, email: false})); 
+                    onChangeText={t => {
+                      setEmail(t);
+                      if (missing.email) setMissing(m => ({ ...m, email: false }));
                       // Clear error if field is empty (since it's optional)
                       if (!t || t.trim().length === 0) {
                         setErrors(prev => {
@@ -351,7 +357,7 @@ const SignupAcademy = () => {
                   <TextInput
                     style={styles.input}
                     value={password}
-                    onChangeText={t => { setPassword(t); if (missing.password) setMissing(m => ({...m, password: false})); }}
+                    onChangeText={t => { setPassword(t); if (missing.password) setMissing(m => ({ ...m, password: false })); }}
                     secureTextEntry
                     placeholder={i18n.t('password_placeholder')}
                     placeholderTextColor="#999"
@@ -391,7 +397,7 @@ const SignupAcademy = () => {
                             style={[styles.cityOption, city === option.key && styles.cityOptionSelected]}
                             onPress={() => {
                               setCity(option.key);
-                              if (missing.city) setMissing(m => ({...m, city: false}));
+                              if (missing.city) setMissing(m => ({ ...m, city: false }));
                               setShowCityModal(false);
                             }}
                           >
@@ -417,7 +423,7 @@ const SignupAcademy = () => {
                   <TextInput
                     style={styles.input}
                     value={address}
-                    onChangeText={t => { setAddress(t); if (missing.address) setMissing(m => ({...m, address: false})); }}
+                    onChangeText={t => { setAddress(t); if (missing.address) setMissing(m => ({ ...m, address: false })); }}
                     autoCapitalize="words"
                     placeholder={i18n.t('address_placeholder')}
                     placeholderTextColor="#999"
@@ -439,54 +445,54 @@ const SignupAcademy = () => {
                     placeholder={i18n.t('description_placeholder')}
                     placeholderTextColor="#999"
                   />
-          </View>
-          </View>
+                </View>
+              </View>
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>
                   {i18n.t('monthlyFeesPerAgeGroup')}
                   <Text style={styles.required}> *</Text>
                 </Text>
-            {renderAgeRows().map((row, rowIdx) => (
-              <View key={rowIdx} style={styles.feeBubblesRow}>
-                {row.map((age) => (
-                  <View key={age} style={{ alignItems: 'center', flex: 1 }}>
-                    <TouchableOpacity
-                      style={[
-                        styles.feeBubble,
-                        selectedAge === age && styles.feeBubbleSelected,
-                      ]}
-                      onPress={() => setSelectedAge(selectedAge === age ? null : age)}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={[
-                        styles.feeBubbleText,
-                        selectedAge === age && styles.feeBubbleTextSelected,
-                      ]}>{age}</Text>
-                    </TouchableOpacity>
-                    {selectedAge === age && (
-                      <Animated.View style={[styles.feeBubbleInputBox, { opacity: fadeAnim, transform: [{ scale: fadeAnim }] }]}> 
-                        <Text style={styles.feeInputLabel}>{i18n.t('enterFeeForAge', { age })}</Text>
-                        <TextInput
-                          style={styles.feeBubbleInput}
-                          value={fees[age] || ''}
-                          onChangeText={(val) => setFees({ ...fees, [age]: val.replace(/[^0-9]/g, '') })}
-                          keyboardType="numeric"
-                          placeholder={i18n.t('feePlaceholder')}
-                          placeholderTextColor="#aaa"
-                          maxLength={6}
-                        />
-                      </Animated.View>
-                    )}
+                {renderAgeRows().map((row, rowIdx) => (
+                  <View key={rowIdx} style={styles.feeBubblesRow}>
+                    {row.map((age) => (
+                      <View key={age} style={{ alignItems: 'center', flex: 1 }}>
+                        <TouchableOpacity
+                          style={[
+                            styles.feeBubble,
+                            selectedAge === age && styles.feeBubbleSelected,
+                          ]}
+                          onPress={() => setSelectedAge(selectedAge === age ? null : age)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[
+                            styles.feeBubbleText,
+                            selectedAge === age && styles.feeBubbleTextSelected,
+                          ]}>{age}</Text>
+                        </TouchableOpacity>
+                        {selectedAge === age && (
+                          <Animated.View style={[styles.feeBubbleInputBox, { opacity: fadeAnim, transform: [{ scale: fadeAnim }] }]}>
+                            <Text style={styles.feeInputLabel}>{i18n.t('enterFeeForAge', { age })}</Text>
+                            <TextInput
+                              style={styles.feeBubbleInput}
+                              value={fees[age] || ''}
+                              onChangeText={(val) => setFees({ ...fees, [age]: val.replace(/[^0-9]/g, '') })}
+                              keyboardType="numeric"
+                              placeholder={i18n.t('feePlaceholder')}
+                              placeholderTextColor="#aaa"
+                              maxLength={6}
+                            />
+                          </Animated.View>
+                        )}
+                      </View>
+                    ))}
+                    {/* Fill empty columns if needed for last row */}
+                    {row.length < 3 && Array.from({ length: 3 - row.length }).map((_, idx) => (
+                      <View key={`empty-${idx}`} style={{ flex: 1 }} />
+                    ))}
                   </View>
                 ))}
-                {/* Fill empty columns if needed for last row */}
-                {row.length < 3 && Array.from({ length: 3 - row.length }).map((_, idx) => (
-                  <View key={`empty-${idx}`} style={{ flex: 1 }} />
-                ))}
+                {errors.fees && <Text style={styles.errorText}>{errors.fees}</Text>}
               </View>
-            ))}
-            {errors.fees && <Text style={styles.errorText}>{errors.fees}</Text>}
-          </View>
 
               <TouchableOpacity
                 style={[styles.signupButton, loading && styles.signupButtonDisabled]}
@@ -494,15 +500,15 @@ const SignupAcademy = () => {
                 disabled={loading}
                 activeOpacity={0.8}
               >
-            {loading ? (
+                {loading ? (
                   <ActivityIndicator color="#fff" />
-            ) : (
+                ) : (
                   <Text style={styles.signupButtonText}>{i18n.t('signup')}</Text>
-            )}
-          </TouchableOpacity>
+                )}
+              </TouchableOpacity>
             </View>
-        </ScrollView>
-      </Animated.View>
+          </ScrollView>
+        </Animated.View>
       </LinearGradient>
     </KeyboardAvoidingView>
   );

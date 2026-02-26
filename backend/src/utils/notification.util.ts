@@ -1,4 +1,4 @@
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 import { db } from '../config/firebase';
 
 export type NotificationType = 'booking' | 'checkin' | 'report' | 'info' | 'system';

@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { signup, signin, refreshToken, getMe } from '../controllers/auth.controller';
+import { signup, signin, refreshToken, getMe, sendOtpHandler, verifyOtpAndRegister } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth.middleware';
+import { authRateLimiter } from '../middleware/rateLimit.middleware';
 
 const router = Router();
 
@@ -41,7 +42,78 @@ const router = Router();
  *       400:
  *         description: Validation error
  */
-router.post('/signup', signup);
+router.post('/signup', authRateLimiter, signup);
+
+/**
+ * @swagger
+ * /api/auth/send-otp:
+ *   post:
+ *     summary: Send OTP to phone number (Step 1 of registration)
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phone
+ *               - role
+ *             properties:
+ *               phone:
+ *                 type: string
+ *                 example: "+923001234567"
+ *               role:
+ *                 type: string
+ *                 enum: [player, agent, academy, parent, clinic, admin]
+ *     responses:
+ *       200:
+ *         description: OTP sent successfully
+ *       409:
+ *         description: Phone number already registered
+ */
+router.post('/send-otp', sendOtpHandler);
+
+/**
+ * @swagger
+ * /api/auth/verify-otp:
+ *   post:
+ *     summary: Verify OTP and create user account (Step 2 of registration)
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - phone
+ *               - otp
+ *               - password
+ *               - role
+ *             properties:
+ *               phone:
+ *                 type: string
+ *               otp:
+ *                 type: string
+ *                 minLength: 6
+ *                 maxLength: 6
+ *               password:
+ *                 type: string
+ *               role:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *                 format: email
+ *     responses:
+ *       201:
+ *         description: User created successfully
+ *       400:
+ *         description: Invalid or expired OTP
+ *       409:
+ *         description: Phone number already registered
+ */
+router.post('/verify-otp', verifyOtpAndRegister);
 
 /**
  * @swagger
@@ -71,7 +143,7 @@ router.post('/signup', signup);
  *       401:
  *         description: Invalid credentials
  */
-router.post('/signin', signin);
+router.post('/signin', authRateLimiter, signin);
 
 /**
  * @swagger
@@ -96,7 +168,7 @@ router.post('/signin', signin);
  *       401:
  *         description: Invalid refresh token
  */
-router.post('/refresh', refreshToken);
+router.post('/refresh', authRateLimiter, refreshToken);
 
 /**
  * @swagger

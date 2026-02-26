@@ -6,7 +6,7 @@ import dotenv from 'dotenv';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 import { errorHandler } from './middleware/errorHandler.middleware';
-import { authRateLimiter } from './middleware/rateLimit.middleware';
+
 
 // Import routes
 import authRoutes from './routes/auth.routes';
@@ -181,7 +181,8 @@ app.get('/health', (req, res) => {
 });
 
 // API Routes
-app.use('/api/auth', authRateLimiter, authRoutes);
+// Note: authRateLimiter is applied inside auth.routes.ts for specific endpoints to avoid blocking OTP testing
+app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/admin', adminRoutes);
