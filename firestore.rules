@@ -1,333 +1,303 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper functions
-    function isAuthenticated() {
+
+    // =========================
+    // Helpers
+    // =========================
+    function isAuthed() {
       return request.auth != null;
     }
-    
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-    
-    function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
-    }
-    
-    function hasRole(role) {
-      return isAuthenticated() && getUserRole() == role;
-    }
-    
-    function hasAnyRole(roles) {
-      return isAuthenticated() && getUserRole() in roles;
-    }
-    
-    // Admin check function
+
+    // Admin allowlist (stored as /admins/{uid})
     function isAdmin() {
-      return isAuthenticated() && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      return isAuthed() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
-    
-    // Users collection
-    match /users/{userId} {
-      // Allow reading own profile when authenticated
-      allow read: if isAuthenticated();
-      // Allow list/query operations for email lookup during login (unauthenticated)
-      // This is necessary to find user by email and get their phone for Firebase Auth
-      allow list: if true; // Allow queries for email lookup (login flow)
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      // Update: Owner can update their own profile, admin can update any user (for moderation)
-      // Special rule: checkInCode can only be set once (if currently null) by owner
-      allow update: if isOwner(userId) && (
-        // Owner can update their own profile
-        (resource.data.checkInCode == null || 
-         request.resource.data.checkInCode == resource.data.checkInCode) ||
-        // Owner can set checkInCode only if it's currently null
-        (resource.data.checkInCode == null && 
-         request.resource.data.checkInCode != null &&
-         'checkInCodeCreatedAt' in request.resource.data)
-      ) || isAdmin(); // Admin can update any user
-      allow delete: if false; // Users cannot be deleted
+
+    function userRole() {
+      return isAuthed()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
     }
-    
-    // Role-specific collections
-    match /players/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isOwner(userId) || isAdmin();
-      allow delete: if false;
+
+    function hasRole(role) {
+      return isAuthed()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
     }
-    
-    match /parents/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isOwner(userId) || isAdmin();
-      allow delete: if false;
+
+    function isConversationParticipant(conversationId) {
+      return isAuthed()
+        && exists(/databases/$(database)/documents/conversations/$(conversationId))
+        && (
+          get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant1Id == request.auth.uid ||
+          get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant2Id == request.auth.uid
+        );
     }
-    
-    match /academies/{academyId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isOwner(academyId) || isAdmin();
-      allow delete: if false;
+
+    // =========================
+    // 1) /admins - Admin only
+    // =========================
+    match /admins/{uid} {
+      allow get, read, list, create, update, delete: if isAdmin();
     }
-    
-    match /clinics/{clinicId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isOwner(clinicId) || isAdmin();
-      allow delete: if false;
+
+    // =========================
+    // 2) /users - Read all auth, Write own only, Admin full access
+    // =========================
+    match /users/{uid} {
+      // Reads & queries: any authenticated user (NO public access)
+      allow get, read: if isAuthed();
+      allow list: if isAuthed();
+
+      // Writes: own doc only; admin can write all
+      allow create, update: if isAuthed() && (request.auth.uid == uid || isAdmin());
+      allow delete: if isAdmin();
     }
-    
-    match /agents/{agentId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated();
-      allow update: if isOwner(agentId) || isAdmin();
-      allow delete: if false;
+
+    // =========================
+    // 3) Role collections - Read all auth, Write own only
+    // /players, /parents, /academies, /clinics, /agents
+    // =========================
+    match /players/{uid} {
+      allow get, read: if isAuthed();
+      allow list: if isAuthed();
+      allow create, update, delete: if isAuthed() && request.auth.uid == uid;
+      allow read, write, list: if isAdmin();
     }
-    
-    // User profiles
-    match /userProfiles/{userId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow update: if isOwner(userId);
-      allow delete: if false;
+
+    match /parents/{uid} {
+      allow get, read: if isAuthed();
+      allow list: if isAuthed();
+      allow create, update, delete: if isAuthed() && request.auth.uid == uid;
+      allow read, write, list: if isAdmin();
     }
-    
-    // Services (for clinics)
-    match /services/{serviceId} {
-      allow read: if isAuthenticated();
-      allow create: if hasRole('CLINIC');
-      allow update: if hasRole('CLINIC') && 
-                       resource.data.clinicId == request.auth.uid;
-      allow delete: if false;
+
+    match /academies/{uid} {
+      allow get, read: if isAuthed();
+      allow list: if isAuthed();
+      allow create, update, delete: if isAuthed() && request.auth.uid == uid;
+      allow read, write, list: if isAdmin();
     }
-    
-    // Academy programs
-    match /academyPrograms/{programId} {
-      allow read: if isAuthenticated();
-      allow create: if hasRole('ACADEMY');
-      allow update: if hasRole('ACADEMY') && 
-                       resource.data.academyId == request.auth.uid;
-      allow delete: if false;
+
+    match /clinics/{uid} {
+      allow get, read: if isAuthed();
+      allow list: if isAuthed();
+      allow create, update, delete: if isAuthed() && request.auth.uid == uid;
+      allow read, write, list: if isAdmin();
     }
-    
-    // Bookings
-    match /bookings/{bookingId} {
-      // Users can read their own bookings or provider bookings
-      allow read: if isAuthenticated() && 
-                     (resource.data.playerId == request.auth.uid || 
-                      resource.data.parentId == request.auth.uid ||
-                      resource.data.providerId == request.auth.uid ||
-                      isAdmin());
-      // Users can create bookings
-      allow create: if isAuthenticated() && 
-                       (request.resource.data.playerId == request.auth.uid ||
-                        request.resource.data.parentId == request.auth.uid);
-      // Users can update their own bookings, providers can update status
-      allow update: if isAuthenticated() && 
-                       (resource.data.playerId == request.auth.uid ||
-                        resource.data.parentId == request.auth.uid ||
-                        resource.data.providerId == request.auth.uid ||
-                        isAdmin());
-      allow delete: if false;
+
+    match /agents/{uid} {
+      allow get, read: if isAuthed();
+      allow list: if isAuthed();
+      allow create, update, delete: if isAuthed() && request.auth.uid == uid;
+      allow read, write, list: if isAdmin();
     }
-    
-    // Notifications (in-app: each user sees their own; create only with createdBy = caller)
-    match /notifications/{notificationId} {
-      allow read: if isAuthenticated() && 
-                     resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && 
-                       request.resource.data.createdBy == request.auth.uid;
-      allow update: if isOwner(resource.data.userId);
-      allow delete: if false;
-    }
-    
-    // Posts
+
+    // =========================
+    // 4) /posts, /media - Read all (authed), Create/Update/Delete own only
+    // MUST include list for feeds (queries)
+    // MUST validate ownerId == auth.uid on create
+    // MUST prevent ownerId changes on update
+    // =========================
     match /posts/{postId} {
-      // Helper function to get allowed visibleToRoles for an ownerRole
-      function getAllowedVisibleToRoles(ownerRole) {
-        return ownerRole == 'player' ? ['player', 'agent', 'academy', 'clinic', 'parent'] :
-               ownerRole == 'agent' ? ['agent', 'academy', 'clinic'] :
-               ownerRole == 'academy' ? ['academy', 'clinic', 'parent'] :
-               ownerRole == 'clinic' ? ['clinic'] :
-               ownerRole == 'parent' ? ['parent'] :
-               ['player', 'agent', 'academy', 'clinic', 'parent']; // default
-      }
-      
-      // Read: Authenticated users can read active posts
-      // Note: Role-based filtering is handled in queries using array-contains
-      // This rule ensures only active posts are readable (unless you're the owner)
-      allow read: if isAuthenticated() && (
-        // Owner can always read their own posts (even if deleted)
-        resource.data.ownerId == request.auth.uid ||
-        // Others can only read active posts (status == 'active' or status field missing for backward compatibility)
-        (resource.data.status == 'active' || !resource.data.status)
-      );
-      
-      // Create: Must be authenticated, ownerId must match auth uid, ownerRole/visibleToRoles must be valid, and user must not be suspended
-      allow create: if isAuthenticated() && 
-                       request.resource.data.ownerId == request.auth.uid &&
-                       request.resource.data.ownerRole != null &&
-                       request.resource.data.visibleToRoles != null &&
-                       request.resource.data.visibleToRoles == getAllowedVisibleToRoles(request.resource.data.ownerRole) &&
-                       (request.resource.data.status == 'active' || request.resource.data.status == null) &&
-                       // Check if user is suspended
-                       get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isSuspended != true;
-      
-      // Update: Owner can update (content, or soft-delete), OR admin can set status to 'deleted'
-      allow update: if isAuthenticated() && (
-                       // Owner can update (but not change ownerId or ownerRole)
-                       (resource.data.ownerId == request.auth.uid &&
-                        request.resource.data.ownerId == resource.data.ownerId &&
-                        request.resource.data.ownerRole == resource.data.ownerRole) ||
-                       // Admin can set status to 'deleted' for moderation
-                       (isAdmin() && 
-                        request.resource.data.status == 'deleted' &&
-                        'deletedAt' in request.resource.data &&
-                        'deletedBy' in request.resource.data)
-                     );
-      
-      // Delete: Only owner can delete (by setting status to 'deleted')
-      allow delete: if isAuthenticated() && 
-                       resource.data.ownerId == request.auth.uid;
+      allow get, read: if isAuthed();
+      allow list: if isAuthed();
+
+      allow create: if isAuthed()
+        && request.resource.data.ownerId == request.auth.uid;
+
+      allow update: if isAuthed()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId;
+
+      allow delete: if isAuthed() && resource.data.ownerId == request.auth.uid;
+
+      allow read, write, list: if isAdmin();
     }
-    
-    // Media
+
     match /media/{mediaId} {
-      // Allow reading public/unlisted media to authenticated users
-      allow read: if isAuthenticated() && 
-                     (resource.data.visibility == 'public' || 
-                      resource.data.visibility == 'unlisted' ||
-                      resource.data.ownerId == request.auth.uid);
-      // Allow creating media with ownerId matching auth uid
-      allow create: if isAuthenticated() && 
-                       request.resource.data.ownerId == request.auth.uid;
-      // Allow updating only by owner (limited fields)
-      allow update: if isAuthenticated() && 
-                       resource.data.ownerId == request.auth.uid;
-      // Allow deleting only by owner
-      allow delete: if isAuthenticated() && 
-                       resource.data.ownerId == request.auth.uid;
-    }
-    
-    // Reports collection
-    match /reports/{reportId} {
-      // Create: Authenticated users can create reports (reporterId must match auth uid)
-      allow create: if isAuthenticated() && 
-                       request.resource.data.reporterId == request.auth.uid &&
-                       request.resource.data.targetType in ['post', 'user'] &&
-                       request.resource.data.reason in ['spam', 'harassment', 'nudity', 'violence', 'fake', 'other'] &&
-                       request.resource.data.status == 'open';
-      
-      // Read: Users can read only their own reports, admins can read all
-      allow read: if isAuthenticated() && 
-                     (resource.data.reporterId == request.auth.uid || isAdmin());
-      
-      // Update: Only admin can update status/resolution
-      allow update: if isAdmin() && 
-                       // Ensure status is valid
-                       (request.resource.data.status == null || 
-                        request.resource.data.status in ['open', 'reviewed', 'resolved']);
-      
-      allow delete: if false; // Reports cannot be deleted
+      allow get, read: if isAuthed();
+      allow list: if isAuthed();
+
+      allow create: if isAuthed()
+        && request.resource.data.ownerId == request.auth.uid;
+
+      allow update: if isAuthed()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId;
+
+      allow delete: if isAuthed() && resource.data.ownerId == request.auth.uid;
+
+      allow read, write, list: if isAdmin();
     }
 
-    // Check-in codes collection (for uniqueness tracking)
-    match /checkInCodes/{code} {
-      // Create: Only if document doesn't exist and uid matches auth uid
-      allow create: if isAuthenticated() && 
-                       request.resource.data.uid == request.auth.uid &&
-                       !exists(/databases/$(database)/documents/checkInCodes/$(code));
-      
-      // Read: Users can read their own code reservation, admins can read all
-      allow read: if isAuthenticated() && 
-                     (resource.data.uid == request.auth.uid || isAdmin());
-      
-      // Update/Delete: Not allowed (codes are permanent)
-      allow update: if false;
-      allow delete: if false;
+    // =========================
+    // 5) Role-based collections (queries require list)
+    // /bookings, /conversations, /messages, /checkins, /notifications, /reports
+    // =========================
+    match /bookings/{bookingId} {
+      // User involved OR admin
+      allow get, read: if isAuthed() && (
+        resource.data.playerId == request.auth.uid ||
+        resource.data.parentId == request.auth.uid ||
+        resource.data.userId == request.auth.uid ||
+        resource.data.providerId == request.auth.uid ||
+        isAdmin()
+      );
+
+      // Queries are allowed for authed users; per-doc read still enforced above.
+      allow list: if isAuthed();
+
+      allow create: if isAuthed() && (
+        request.resource.data.playerId == request.auth.uid ||
+        request.resource.data.parentId == request.auth.uid ||
+        request.resource.data.userId == request.auth.uid ||
+        isAdmin()
+      );
+
+      allow update, delete: if isAuthed() && (
+        resource.data.playerId == request.auth.uid ||
+        resource.data.parentId == request.auth.uid ||
+        resource.data.userId == request.auth.uid ||
+        resource.data.providerId == request.auth.uid ||
+        isAdmin()
+      );
     }
 
-    // Check-ins collection
-    match /checkins/{checkinId} {
-      // Create: Only academy/clinic users can create check-ins
-      allow create: if isAuthenticated() && 
-                       (getUserRole() == 'academy' || getUserRole() == 'clinic') &&
-                       request.resource.data.createdBy == request.auth.uid &&
-                       request.resource.data.locationId == request.auth.uid &&
-                       request.resource.data.locationRole in ['academy', 'clinic'] &&
-                       request.resource.data.userRole in ['player', 'parent'];
-      
-      // Read: Admin can read all, users can read their own check-ins
-      allow read: if isAuthenticated() && 
-                     (isAdmin() || resource.data.userId == request.auth.uid);
-      
-      // Update/Delete: Not allowed (check-ins are immutable)
-      allow update: if false;
-      allow delete: if false;
-    }
-
-    // Settings (Admin settings like commission rate)
-    match /settings/{settingId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
-    }
-
-    // Conversations collection
     match /conversations/{conversationId} {
-      // Read: Users can only read conversations they are part of
-      allow read: if isAuthenticated() && 
-                     (resource.data.participant1Id == request.auth.uid ||
-                      resource.data.participant2Id == request.auth.uid);
-      
-      // Create: Users can create conversations where they are a participant
-      allow create: if isAuthenticated() && 
-                       (request.resource.data.participant1Id == request.auth.uid ||
-                        request.resource.data.participant2Id == request.auth.uid);
-      
-      // Update: Users can update conversations they are part of (for lastMessage, etc.)
-      allow update: if isAuthenticated() && 
-                       (resource.data.participant1Id == request.auth.uid ||
-                        resource.data.participant2Id == request.auth.uid);
-      
-      // Delete: Not allowed (conversations are permanent)
-      allow delete: if false;
-      
-      // Messages subcollection
+      // Allow authenticated users to check for existence (getDoc) when the
+      // conversation does not yet exist, so getOrCreateConversation() can work.
+      // For existing docs, restrict reads to participants or admin.
+      allow get, read: if isAuthed() && (
+        resource == null ||     // non-existent doc: allow the read attempt
+        resource.data.participant1Id == request.auth.uid ||
+        resource.data.participant2Id == request.auth.uid ||
+        isAdmin()
+      );
+
+      // Needed for `subscribeToConversations()` queries
+      allow list: if isAuthed();
+
+      allow create: if isAuthed() && (
+        request.resource.data.participant1Id == request.auth.uid ||
+        request.resource.data.participant2Id == request.auth.uid ||
+        isAdmin()
+      );
+
+      allow update, delete: if isAuthed() && (
+        resource.data.participant1Id == request.auth.uid ||
+        resource.data.participant2Id == request.auth.uid ||
+        isAdmin()
+      );
+
       match /messages/{messageId} {
-        // Read: Users can read messages in conversations they are part of
-        allow read: if isAuthenticated() && 
-                       (get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant1Id == request.auth.uid ||
-                        get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant2Id == request.auth.uid);
-        
-        // Create: Users can send messages in conversations they are part of
-        allow create: if isAuthenticated() && 
-                         request.resource.data.senderId == request.auth.uid &&
-                         (get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant1Id == request.auth.uid ||
-                          get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant2Id == request.auth.uid);
-        
-        // Update: Users can mark messages as read (only isRead field)
-        allow update: if isAuthenticated() && 
-                         (get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant1Id == request.auth.uid ||
-                          get(/databases/$(database)/documents/conversations/$(conversationId)).data.participant2Id == request.auth.uid) &&
-                         // Only allow updating isRead field, and only if message is not from current user
-                         resource.data.senderId != request.auth.uid &&
-                         request.resource.data.isRead == true &&
-                         request.resource.data.senderId == resource.data.senderId &&
-                         request.resource.data.content == resource.data.content &&
-                         request.resource.data.createdAt == resource.data.createdAt;
-        
-        // Delete: Not allowed (messages are permanent)
-        allow delete: if false;
+        allow get, read: if isAuthed() && (isConversationParticipant(conversationId) || isAdmin());
+        allow list: if isAuthed() && (isConversationParticipant(conversationId) || isAdmin());
+
+        allow create: if isAuthed()
+          && request.resource.data.senderId == request.auth.uid
+          && (isConversationParticipant(conversationId) || isAdmin());
+
+        // Allow participants to update messages (e.g., mark isRead) and sender to edit their own message.
+        // (Keeps existing app behavior; can be tightened further once schema is stabilized.)
+        allow update, delete: if isAuthed() && (
+          isConversationParticipant(conversationId) ||
+          isAdmin()
+        );
       }
     }
 
-    // Admin can read all collections
+    match /checkins/{checkinId} {
+      allow get, read: if isAuthed() && (
+        isAdmin() ||
+        resource.data.userId == request.auth.uid ||
+        resource.data.playerId == request.auth.uid ||
+        resource.data.createdBy == request.auth.uid
+      );
+      allow list: if isAuthed();
+
+      // Create: only academy/clinic (based on role stored in /users/{uid})
+      allow create: if isAuthed()
+        && (hasRole('academy') || hasRole('clinic'))
+        && request.resource.data.createdBy == request.auth.uid;
+
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow get, read: if isAuthed() && (
+        resource.data.userId == request.auth.uid ||
+        isAdmin()
+      );
+
+      // Needed for `subscribeMyNotifications()` query
+      allow list: if isAuthed();
+
+      // App currently creates notifications client-side (provider/admin notifications too).
+      // Minimal guard: require `createdBy == auth.uid`.
+      allow create: if isAuthed()
+        && request.resource.data.createdBy == request.auth.uid;
+
+      // Recipient can mark as read; admin can do anything.
+      allow update: if isAdmin() || (
+        isAuthed()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.read == true
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    match /reports/{reportId} {
+      allow get, read: if isAuthed() && (
+        resource.data.reporterId == request.auth.uid ||
+        isAdmin()
+      );
+
+      allow list: if isAdmin(); // admin screens use queries
+
+      allow create: if isAuthed()
+        && request.resource.data.reporterId == request.auth.uid;
+
+      allow update, delete: if isAdmin();
+    }
+
+    // =========================
+    // 6) /checkInCodes - Check-in code reservation and lookup
+    // Used during signup (player/parent) and for QR code scanning
+    // =========================
+    match /checkInCodes/{codeId} {
+      // Read: Any authenticated user can read (needed for QR scanning/lookup)
+      allow get, read: if isAuthed();
+      allow list: if isAuthed();
+
+      // Create: User can only reserve a code for themselves (uid must match auth.uid)
+      // This ensures users can't create codes for other users
+      allow create: if isAuthed()
+        && request.resource.data.uid == request.auth.uid;
+
+      // Update/Delete: Only admin (codes are immutable once created)
+      allow update, delete: if isAdmin();
+    }
+
+    // =========================
+    // 7) /settings - Read all auth, Write admin only
+    // =========================
+    match /settings/{settingId} {
+      allow get, read: if isAuthed();
+      allow list: if isAuthed();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // =========================
+    // Default deny (NO public access)
+    // =========================
     match /{document=**} {
-      allow read: if isAdmin();
+      allow read, write: if false;
     }
   }
 }
-

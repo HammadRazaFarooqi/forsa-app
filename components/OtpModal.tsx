@@ -15,7 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { auth } from '../lib/firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { BACKEND_URL } from '../lib/config';
+import { getBackendUrl } from '../lib/config';
 
 interface OtpModalProps {
     visible: boolean;
@@ -112,7 +112,8 @@ export default function OtpModal({
         setLoading(true);
         setError('');
         try {
-            const response = await fetch(`${BACKEND_URL}/api/auth/verify-otp`, {
+            const backendUrl = getBackendUrl(); // Get dynamic IP at runtime
+            const response = await fetch(`${backendUrl}/api/auth/verify-otp`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ phone, otp: code, password, role, email }),
@@ -152,7 +153,8 @@ export default function OtpModal({
         setResendLoading(true);
         setError('');
         try {
-            const response = await fetch(`${BACKEND_URL}/api/auth/send-otp`, {
+            const backendUrl = getBackendUrl(); // Get dynamic IP at runtime
+            const response = await fetch(`${backendUrl}/api/auth/send-otp`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ phone, role }),

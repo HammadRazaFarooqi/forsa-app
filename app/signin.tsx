@@ -89,115 +89,66 @@ const SignInScreen = () => {
       }
 
       // Sign in with Firebase Auth
-      let userCredential: any = null;
-      let authError: any = null;
-      
+      // Note: With strict Firestore rules (no public access), we MUST NOT query `/users`
+      // before authentication (request.auth would be null and Firestore will correctly deny it).
+      let userCredential: any;
       try {
-        // First attempt: Try direct email authentication (for admin accounts)
-        userCredential = await signInWithEmailAndPassword(
-          auth,
-          authEmail,
-          password
-        );
+        userCredential = await signInWithEmailAndPassword(auth, authEmail, password);
       } catch (error: any) {
-        authError = error;
-        // If direct email authentication failed and it's an email input,
-        // try looking up phone number from Firestore (for regular users)
-        if (isEmail && (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password')) {
-          try {
-            const { collection, query, where, getDocs, limit } = await import('firebase/firestore');
-            const usersRef = collection(db, 'users');
-            const emailQuery = query(
-              usersRef, 
-              where('email', '==', email.trim().toLowerCase()),
-              limit(1)
-            );
-            const emailSnapshot = await getDocs(emailQuery);
-            
-            if (!emailSnapshot.empty) {
-              // Found user by email - get their phone number
-              const userDoc = emailSnapshot.docs[0];
-              const userData = userDoc.data();
-              const phone = userData.phone;
-              
-              if (phone) {
-                // Construct the Firebase Auth email using their phone
-                const normalizedPhone = normalizePhoneForAuth(phone);
-                authEmail = `user_${normalizedPhone}@forsa.app`;
-                
-                // Try authentication again with phone-based email
-                try {
-                  userCredential = await signInWithEmailAndPassword(
-                    auth,
-                    authEmail,
-                    password
-                  );
-                  authError = null; // Success - clear error
-                } catch (retryError: any) {
-                  authError = retryError; // Keep the error for final handling
-                }
-              } else {
-                // Phone not found - user exists but can't authenticate
-                throw new Error('User account found but phone number is missing. Please contact support.');
-              }
-            } else {
-              // Email not found in Firestore - keep original auth error
-              throw error;
-            }
-          } catch (firestoreError: any) {
-            // If Firestore query fails or user not found, use original auth error
-            if (firestoreError.message && firestoreError.message.includes('phone number is missing')) {
-              throw firestoreError;
-            }
-            // Re-throw original authentication error
-            throw error;
-          }
-        } else {
-          // Not an email or different error - re-throw
-          throw error;
+        // If this is an email input, we only support direct email/password sign-in (typically admin accounts).
+        // Regular users created with phone-based auth email (`user_{phone}@forsa.app`) should sign in via phone number.
+        if (
+          isEmail &&
+          (error?.code === "auth/invalid-credential" ||
+            error?.code === "auth/user-not-found" ||
+            error?.code === "auth/wrong-password")
+        ) {
+          const e = new Error(
+            "Invalid credentials. If you registered using your phone number, please sign in using your phone number instead of email."
+          ) as any;
+          e.code = error?.code;
+          throw e;
         }
-      }
-      
-      // If we still have an error after all attempts, handle it
-      if (authError || !userCredential) {
-        // Provide more helpful error messages
-        if (authError && (authError.code === 'auth/invalid-credential' || authError.code === 'auth/wrong-password' || authError.code === 'auth/user-not-found')) {
-          if (isEmail) {
-            throw new Error('Invalid credentials. Please check your email and password, or try logging in with your phone number.');
-          }
-          throw new Error('Invalid credentials. Please check your phone number and password.');
-        }
-        if (authError) {
-          throw authError;
-        }
-        throw new Error('Authentication failed. Please try again.');
-      }
-      
-      const user = userCredential.user;
 
-      // Get user role from Firestore
-      const userDoc = await getDoc(doc(db, "users", user.uid));
+        // Re-throw (outer catch maps firebase error codes to messages)
+        throw error;
+      }
+
+      const user = userCredential.user;
+      console.log("User after login:", user?.uid);
+
+      // Load user role/status from Firestore
+      let userDoc;
+      try {
+        userDoc = await getDoc(doc(db, "users", user.uid));
+      } catch (e: any) {
+        console.error(
+          "🔥 Failed to load user profile from Firestore:",
+          e?.code ?? "unknown",
+          e?.message ?? String(e)
+        );
+        throw new Error("Login succeeded, but loading your profile failed. Please try again.");
+      }
+
       if (!userDoc.exists()) {
         throw new Error("User profile not found");
       }
 
-      const userData = userDoc.data();
+      const userData: any = userDoc.data();
       const role = userData.role;
       const status = userData.status;
 
       // Check if user is suspended
-      if (status === 'suspended') {
-        // Sign out the user immediately if they are suspended
+      if (status === "suspended") {
         await auth.signOut();
         throw new Error("Your account has been suspended. Please contact support.");
       }
 
       // Use the Integrated AuthContext for role-based navigation and state
-      // This ensures the (admin) layout guard can see the authenticated state
-      await login(authEmail, role === 'admin' ? 'admin' : 'user');
+      await login(authEmail, role === "admin" ? "admin" : "user");
 
       // ✅ Navigate based on role
-      if (role === 'admin') {
+      if (role === "admin") {
         router.replace("/(admin)/dashboard");
       } else {
         switch (role) {
@@ -220,6 +171,7 @@ const SignInScreen = () => {
             Alert.alert("Error", "Unknown role");
         }
       }
+      
     } catch (err: any) {
       let errorMessage = i18n.t("loginFailed") || "Login failed";
       if (err.code === "auth/user-not-found") {
@@ -237,8 +189,14 @@ const SignInScreen = () => {
       }
       setErrors({ submit: errorMessage });
       Alert.alert(i18n.t("loginFailed") || "Login failed", errorMessage);
-      console.error("❌ Login error:", err);
-      console.error("❌ Attempted email:", authEmail);
+      // Avoid logging raw Error objects in Expo/Hermes on Windows — it can trigger Metro
+      // symbolication attempts against the pseudo-file `InternalBytecode.js` and spam ENOENT.
+      console.error(
+        "❌ Login error:",
+        err?.code ?? "unknown",
+        err?.message ?? String(err)
+      );
+      console.error("❌ Attempted identifier:", authEmail);
     } finally {
       setLoading(false);
     }

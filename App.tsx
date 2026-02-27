@@ -15,6 +15,29 @@ import '../locales/i18n'; // Load translations
 import '../lib/firebase'; // Initialize Firebase
 import { initializeLanguage } from '../lib/languageUtils';
 
+// Handle unhandled promise rejections (e.g., keep-awake errors from dependencies)
+// This suppresses non-critical errors from dependencies like expo-keep-awake
+if (typeof ErrorUtils !== 'undefined') {
+  const originalHandler = ErrorUtils.getGlobalHandler();
+  ErrorUtils.setGlobalHandler((error: Error, isFatal?: boolean) => {
+    // Suppress keep-awake errors (common on web/simulator where it's not supported)
+    const errorMessage = error?.message || String(error || '');
+    if (
+      errorMessage.includes('keep awake') ||
+      errorMessage.includes('keep-awake') ||
+      errorMessage.includes('KeepAwake') ||
+      errorMessage.includes('Unable to activate keep awake')
+    ) {
+      // Silently ignore - keep-awake is not critical for app functionality
+      return;
+    }
+    // Call original handler for other errors
+    if (originalHandler) {
+      originalHandler(error, isFatal);
+    }
+  });
+}
+
 // Set initial RTL state based on saved language
 initializeLanguage().catch(error => {
   console.error('Error initializing language:', error);

@@ -19,8 +19,9 @@ import {
   ActivityIndicator
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
 import { uploadImageToStorage } from '../lib/firebaseHelpers';
 import {
   validateEmail,
@@ -28,10 +29,12 @@ import {
   validatePassword,
   validateName,
   validateCity,
+  normalizePhoneForAuth,
 } from '../lib/validations';
 import i18n from '../locales/i18n';
-import OtpModal from '../components/OtpModal';
-import { BACKEND_URL } from '../lib/config';
+// OTP functionality commented out - direct Firebase signup enabled
+// import OtpModal from '../components/OtpModal';
+// import { getBackendUrl } from '../lib/config';
 
 
 interface Errors {
@@ -60,8 +63,9 @@ const SignupAgent = () => {
   const [errors, setErrors] = useState<Errors>({});
   const [missing, setMissing] = useState<{ [key: string]: boolean }>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [showOtpModal, setShowOtpModal] = useState(false);
-  const [otpPhone, setOtpPhone] = useState('');
+  // OTP functionality commented out - direct Firebase signup enabled
+  // const [showOtpModal, setShowOtpModal] = useState(false);
+  // const [otpPhone, setOtpPhone] = useState('');
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   const cityOptions = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>).map(([key, label]) => ({ key, label }));
@@ -147,6 +151,7 @@ const SignupAgent = () => {
     }
   };
 
+  // OTP functionality commented out - direct Firebase signup enabled
   const handleSignup = async () => {
     if (!validate()) {
       Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
@@ -155,38 +160,25 @@ const SignupAgent = () => {
     try {
       setLoading(true);
       setFormError('');
-      const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
-      const otpRes = await fetch(`${BACKEND_URL}/api/auth/send-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: normalizedPhone, role: 'agent' }),
-      });
-      const otpData = await otpRes.json();
-      if (!otpRes.ok || !otpData.success) {
-        const msg = otpData.error?.message || 'Failed to send OTP';
-        setFormError(msg);
-        Alert.alert('Error', msg);
-        return;
-      }
-      setOtpPhone(normalizedPhone);
-      setShowOtpModal(true);
-    } catch (err: any) {
-      const msg = err.message || i18n.t('signupFailedMessage');
-      setFormError(msg);
-      Alert.alert(i18n.t('signupFailed'), msg);
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleOtpVerified = async (uid: string, _token: string, _refreshToken: string) => {
-    setShowOtpModal(false);
-    try {
-      setLoading(true);
+      // Step 1: Create Firebase Auth user directly (no OTP)
+      const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
+      const phoneForAuth = normalizePhoneForAuth(normalizedPhone);
+      const authEmail = `user_${phoneForAuth}@forsa.app`;
+      
+      // console.log('[Signup] Creating Firebase user with email:', authEmail);
+      const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
+      const user = userCredential.user;
+      const uid = user.uid;
+      // console.log('[Signup] Firebase user created! UID:', uid);
+
+      // Step 2: Upload profile photo
       let profilePhotoUrl = '';
       if (profilePhoto) {
         profilePhotoUrl = await uploadImageToStorage(profilePhoto, `users/${uid}/profile.jpg`);
       }
+
+      // Step 3: Save user data to Firestore
       const userData = {
         uid,
         role: 'agent',
@@ -203,13 +195,31 @@ const SignupAgent = () => {
       };
       await setDoc(doc(db, 'users', uid), userData, { merge: true });
       await setDoc(doc(db, 'agents', uid), userData);
+      
+      // Step 4: User is already signed in, redirect to dashboard
+      // console.log('[Signup] User is logged in and navigating to agent-feed...');
       router.replace('/agent-feed');
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to save profile data');
+      // console.log('[Signup] Error:', err.message, err);
+      let errorMsg = i18n.t('signupFailedMessage');
+      if (err.code === 'auth/email-already-in-use') {
+        errorMsg = 'This phone number is already registered';
+      } else if (err.code === 'auth/weak-password') {
+        errorMsg = i18n.t('weakPassword') || 'Password is too weak';
+      } else if (err.message) {
+        errorMsg = err.message;
+      }
+      setFormError(errorMsg);
+      Alert.alert(i18n.t('signupFailed'), errorMsg);
     } finally {
       setLoading(false);
     }
   };
+
+  // OTP functionality commented out - direct Firebase signup enabled
+  // const handleOtpVerified = async (uid: string, _token: string, _refreshToken: string) => {
+  //   ... commented out ...
+  // };
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -219,7 +229,8 @@ const SignupAgent = () => {
       >
         <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
           {/* OTP Modal */}
-          <OtpModal
+          {/* OTP functionality commented out - direct Firebase signup enabled */}
+          {/* <OtpModal
             visible={showOtpModal}
             phone={otpPhone}
             password={password}

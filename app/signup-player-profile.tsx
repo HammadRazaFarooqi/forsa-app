@@ -3,7 +3,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { signInWithCustomToken } from 'firebase/auth';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import React, { useRef, useState } from 'react';
 import {
@@ -23,7 +23,7 @@ import {
   View
 } from 'react-native';
 import { uploadImageToStorage } from '../lib/firebaseHelpers';
-import { db } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
 import {
   validateCity,
   validateEmail,
@@ -31,10 +31,12 @@ import {
   validatePassword,
   validatePhone,
   validateRequired,
+  normalizePhoneForAuth,
 } from '../lib/validations';
 import i18n from '../locales/i18n';
-import OtpModal from '../components/OtpModal';
-import { BACKEND_URL } from '../lib/config';
+// OTP functionality commented out - direct Firebase signup enabled
+// import OtpModal from '../components/OtpModal';
+// import { getBackendUrl } from '../lib/config';
 
 const POSITIONS = [
   'GK', 'LB', 'CB', 'RB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST'
@@ -76,8 +78,9 @@ const SignupPlayer = () => {
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [missing, setMissing] = useState<{ [key: string]: boolean }>({});
-  const [showOtpModal, setShowOtpModal] = useState(false);
-  const [otpPhone, setOtpPhone] = useState('');  // normalized E.164 phone
+  // OTP functionality commented out - direct Firebase signup enabled
+  // const [showOtpModal, setShowOtpModal] = useState(false);
+  // const [otpPhone, setOtpPhone] = useState('');  // normalized E.164 phone
 
   // Animation for transitions
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -247,6 +250,12 @@ const SignupPlayer = () => {
   };
 
 
+  // OTP functionality commented out - direct Firebase signup enabled
+  // const handleSignup = async () => {
+  //   ... OTP code commented out ...
+  // };
+
+  /** Direct Firebase signup - OTP functionality commented out */
   const handleSignup = async () => {
     if (!validate()) {
       Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
@@ -257,64 +266,31 @@ const SignupPlayer = () => {
       setLoading(true);
       setFormError('');
 
+      // Step 1: Create Firebase Auth user directly (no OTP)
       const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
-      console.log('[Signup] Sending OTP to:', normalizedPhone, '| Backend:', BACKEND_URL);
+      const phoneForAuth = normalizePhoneForAuth(normalizedPhone);
+      const authEmail = `user_${phoneForAuth}@forsa.app`;
+      
+      // console.log('[Signup] Creating Firebase user with email:', authEmail);
+      const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
+      const user = userCredential.user;
+      const uid = user.uid;
+      // console.log('[Signup] Firebase user created! UID:', uid);
 
-      // Step 1: Send OTP via backend — do NOT create Firebase user yet
-      const otpRes = await fetch(`${BACKEND_URL}/api/auth/send-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: normalizedPhone, role: 'player' }),
-      });
-
-      console.log('[Signup] OTP response status:', otpRes.status);
-      const otpData = await otpRes.json();
-      console.log('[Signup] OTP response data:', JSON.stringify(otpData));
-
-      if (!otpRes.ok || !otpData.success) {
-        const msg = otpData.error?.message || otpData.message || 'Failed to send OTP';
-        setFormError(msg);
-        Alert.alert('OTP Error', msg);
-        return;
-      }
-
-      // Step 2: Show OTP modal — user creation happens AFTER verification
-      setOtpPhone(normalizedPhone);
-      setShowOtpModal(true);
-      console.log('[Signup] OTP modal shown for:', normalizedPhone);
-    } catch (err: any) {
-      console.log('[Signup] Network/fetch error:', err.message, err);
-      const msg = err.message?.includes('Network request failed')
-        ? `Network error — backend (${BACKEND_URL}) unreachable. Check IP & server.`
-        : err.message || i18n.t('signupFailedMessage');
-      setFormError(msg);
-      Alert.alert(i18n.t('signupFailed'), msg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  /** Called by OtpModal after OTP is successfully verified and Firebase user is created by backend */
-  const handleOtpVerified = async (uid: string, token: string, refreshToken: string) => {
-    setShowOtpModal(false);
-    console.log('[Signup] OTP verified! UID:', uid);
-    try {
-      setLoading(true);
+      // Step 2: Upload images to Firebase Storage
       const dobString = formatDateForDB(dob);
-
-      // Upload images to Firebase Storage (user already exists now)
       let profilePhotoUrl = '';
       let nationalIdPhotoUrl = '';
       if (profilePhoto) {
-        console.log('[Signup] Uploading profile photo...');
+        // console.log('[Signup] Uploading profile photo...');
         profilePhotoUrl = await uploadImageToStorage(profilePhoto, `users/${uid}/profile.jpg`);
       }
       if (nationalIdPhoto) {
-        console.log('[Signup] Uploading national ID photo...');
+        // console.log('[Signup] Uploading national ID photo...');
         nationalIdPhotoUrl = await uploadImageToStorage(nationalIdPhoto, `users/${uid}/nationalId.jpg`);
       }
 
-      // Save extended player profile to Firestore
+      // Step 3: Save extended player profile to Firestore
       const userData = {
         uid,
         role: 'player',
@@ -332,25 +308,41 @@ const SignupPlayer = () => {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      console.log('[Signup] Saving to Firestore...');
+      // console.log('[Signup] Saving to Firestore...');
       await setDoc(doc(db, 'users', uid), userData, { merge: true });
       await setDoc(doc(db, 'players', uid), { ...userData, highlightVideo: highlightVideo || '' });
-      console.log('[Signup] Firestore saved! Navigating to player-feed...');
+      // console.log('[Signup] Firestore saved! User is logged in and navigating to player-feed...');
 
-      // Generate check-in code (non-blocking)
+      // Step 4: Generate check-in code (non-blocking)
       try {
         const { ensureCheckInCodeForCurrentUser } = await import('../services/CheckInCodeService');
         await ensureCheckInCodeForCurrentUser();
       } catch { }
 
+      // Step 5: User is already signed in via createUserWithEmailAndPassword, redirect to dashboard
       router.replace('/player-feed');
     } catch (err: any) {
-      console.log('[Signup] Error in handleOtpVerified:', err.message, err);
-      Alert.alert('Error', err.message || 'Failed to save profile data');
+      // console.log('[Signup] Error in handleSignup:', err.message, err);
+      let errorMsg = i18n.t('signupFailedMessage');
+      if (err.code === 'auth/email-already-in-use') {
+        errorMsg = i18n.t('emailAlreadyRegistered') || 'This phone number is already registered';
+      } else if (err.code === 'auth/weak-password') {
+        errorMsg = i18n.t('weakPassword') || 'Password is too weak';
+      } else if (err.message) {
+        errorMsg = err.message;
+      }
+      setFormError(errorMsg);
+      Alert.alert(i18n.t('signupFailed'), errorMsg);
     } finally {
       setLoading(false);
     }
   };
+
+  // OTP functionality commented out - direct Firebase signup enabled
+  // /** Called by OtpModal after OTP is successfully verified and Firebase user is created by backend */
+  // const handleOtpVerified = async (uid: string, token: string, refreshToken: string) => {
+  //   ... commented out ...
+  // };
 
 
 
@@ -414,7 +406,8 @@ const SignupPlayer = () => {
         <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
 
           {/* OTP Modal */}
-          <OtpModal
+          {/* OTP functionality commented out - direct Firebase signup enabled */}
+          {/* <OtpModal
             visible={showOtpModal}
             phone={otpPhone}
             password={password}
@@ -422,7 +415,7 @@ const SignupPlayer = () => {
             email={email && email.trim().length > 0 ? email.trim() : undefined}
             onClose={() => setShowOtpModal(false)}
             onVerified={handleOtpVerified}
-          />
+          /> */}
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.backButton} onPress={handleBack}>

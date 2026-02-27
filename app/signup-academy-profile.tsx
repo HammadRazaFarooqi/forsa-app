@@ -32,7 +32,7 @@ import {
 } from '../lib/validations';
 import i18n from '../locales/i18n';
 import OtpModal from '../components/OtpModal';
-import { BACKEND_URL } from '../lib/config';
+import { getBackendUrl } from '../lib/config';
 
 const SignupAcademy = () => {
   const router = useRouter();
@@ -158,7 +158,8 @@ const SignupAcademy = () => {
       setLoading(true);
       setFormError('');
       const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
-      const otpRes = await fetch(`${BACKEND_URL}/api/auth/send-otp`, {
+      const backendUrl = getBackendUrl(); // Get dynamic IP at runtime
+      const otpRes = await fetch(`${backendUrl}/api/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: normalizedPhone, role: 'academy' }),
