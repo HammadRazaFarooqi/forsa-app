@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { collection, getDocs, getFirestore, orderBy, query } from 'firebase/firestore';
+import { collection, getDocs, getFirestore, orderBy, query, where } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, Alert } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
@@ -75,11 +75,35 @@ export default function AgentPlayersScreen() {
       setLoading(true);
       try {
         const db = getFirestore();
-        const playersCollection = collection(db, 'players');
-        const playersSnapshot = await getDocs(query(playersCollection, orderBy('createdAt', 'desc')));
-        const playersData = playersSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setPlayers(playersData);
-      } catch (e) {
+        // Fetch from 'users' collection where role is 'player' to ensure we get everyone
+        const usersRef = collection(db, 'users');
+        const q = query(
+          usersRef,
+          where('role', '==', 'player')
+          // Removed orderBy('createdAt') to avoid index requirements and missing field filtering
+        );
+
+        const querySnapshot = await getDocs(q);
+        const playersData = querySnapshot.docs.map(doc => {
+          const data = doc.data() as Player;
+          return {
+            ...data,
+            id: doc.id,
+            // Normalize video field: check pinnedVideo first, then highlightVideo
+            pinnedVideo: data.pinnedVideo || data.highlightVideo || null
+          } as Player;
+        });
+
+        // Sort in memory to avoid needing a composite index
+        const sortedPlayers = playersData.sort((a, b) => {
+          const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return dateB - dateA;
+        });
+
+        setPlayers(sortedPlayers);
+      } catch (e: any) {
+        console.error('Error fetching players:', e);
         setPlayers([]);
       }
       setLoading(false);
@@ -140,7 +164,7 @@ export default function AgentPlayersScreen() {
             data={filteredPlayers}
             keyExtractor={item => item.id}
             ListHeaderComponent={
-              <View style={styles.filterBox}> 
+              <View style={styles.filterBox}>
                 <Text style={styles.filterTitle}>{i18n.t('filterPlayers') || 'Filter Players'}</Text>
                 <View style={styles.filterRow}>
                   <View style={styles.filterInputWrapper}>
@@ -226,7 +250,7 @@ export default function AgentPlayersScreen() {
                 <View style={styles.playerCard}>
                   <TouchableOpacity
                     style={styles.favoriteButton}
-                    onPress={() => {}}
+                    onPress={() => { }}
                   >
                     <Ionicons name="star" size={24} color="#FFD700" />
                   </TouchableOpacity>
@@ -286,19 +310,19 @@ export default function AgentPlayersScreen() {
                 <TouchableOpacity style={styles.modalButton} onPress={() => { setShowProfile(false); router.push({ pathname: '/player-view-details', params: { id: selectedPlayer.id } }); }}>
                   <Text style={styles.modalButtonText}>{i18n.t('viewProfile') || 'View Profile'}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.modalButton} 
+                <TouchableOpacity
+                  style={styles.modalButton}
                   onPress={async () => {
                     try {
                       setShowProfile(false);
                       const conversationId = await startConversationWithUser(selectedPlayer.id);
-                      router.push({ 
-                        pathname: '/agent-messages', 
-                        params: { 
+                      router.push({
+                        pathname: '/agent-messages',
+                        params: {
                           conversationId,
                           otherUserId: selectedPlayer.id,
                           name: `${selectedPlayer.firstName} ${selectedPlayer.lastName}`.trim() || 'Player'
-                        } 
+                        }
                       });
                     } catch (error: any) {
                       Alert.alert(i18n.t('error') || 'Error', error.message || 'Failed to start conversation');

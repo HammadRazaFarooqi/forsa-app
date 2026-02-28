@@ -43,13 +43,22 @@ export default function AgentPlayerProfileScreen() {
           setVideos(['https://www.w3schools.com/html/mov_bbb.mp4']);
         } else {
           const db = getFirestore();
-          const docRef = doc(db, 'players', id);
-          const docSnap = await getDoc(docRef);
+          // Try 'players' first, then fallback to 'users'
+          let docSnap = await getDoc(doc(db, 'players', id));
+          if (!docSnap.exists()) {
+            docSnap = await getDoc(doc(db, 'users', id));
+          }
+
           if (docSnap.exists()) {
             const data = docSnap.data();
             setPlayer({ id, ...data });
-            // Assume videos are in a 'videos' array or fallback to pinnedVideo
-            setVideos(data.videos || (data.pinnedVideo ? [data.pinnedVideo] : []));
+            // Assume videos are in a 'videos' array or fallback to pinnedVideo or highlightVideo
+            setVideos(data.videos ||
+              (data.pinnedVideo ? [data.pinnedVideo] :
+                (data.highlightVideo ? [data.highlightVideo] : [])));
+          } else {
+            setPlayer(null);
+            setVideos([]);
           }
         }
       } catch (e) {
@@ -77,17 +86,17 @@ export default function AgentPlayerProfileScreen() {
       </View>
       <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent}>
         <Text style={styles.name}>{player.firstName} {player.lastName}</Text>
-      <Text style={styles.label}>{i18n.t('age') || 'Age'}: <Text style={styles.value}>{getAge(player.dob) || '-'}</Text></Text>
-      <Text style={styles.label}>{i18n.t('position') || 'Position'}: <Text style={styles.value}>{getPositionLabel(player.position || '-')}</Text></Text>
-      <Text style={styles.label}>{i18n.t('city') || 'City'}: <Text style={styles.value}>{getCityLabel(player.city || '-')}</Text></Text>
-      <Text style={[styles.label, { marginTop: 18, marginBottom: 8 }]}>{i18n.t('videos') || 'Videos'}</Text>
-      {videos.length === 0 && <Text style={{ color: '#888', marginBottom: 20 }}>{i18n.t('noVideos') || 'No videos available.'}</Text>}
-      {videos.map((vid, idx) => (
-        <View key={vid + idx} style={{ width: '100%', maxWidth: 400, marginBottom: 18 }}>
-          <VideoWithNaturalSize uri={vid} />
-        </View>
-      ))}
-    </ScrollView>
+        <Text style={styles.label}>{i18n.t('age') || 'Age'}: <Text style={styles.value}>{getAge(player.dob) || '-'}</Text></Text>
+        <Text style={styles.label}>{i18n.t('position') || 'Position'}: <Text style={styles.value}>{getPositionLabel(player.position || '-')}</Text></Text>
+        <Text style={styles.label}>{i18n.t('city') || 'City'}: <Text style={styles.value}>{getCityLabel(player.city || '-')}</Text></Text>
+        <Text style={[styles.label, { marginTop: 18, marginBottom: 8 }]}>{i18n.t('videos') || 'Videos'}</Text>
+        {videos.length === 0 && <Text style={{ color: '#888', marginBottom: 20 }}>{i18n.t('noVideos') || 'No videos available.'}</Text>}
+        {videos.map((vid, idx) => (
+          <View key={vid + idx} style={{ width: '100%', maxWidth: 400, marginBottom: 18 }}>
+            <VideoWithNaturalSize uri={vid} />
+          </View>
+        ))}
+      </ScrollView>
     </View>
   );
 }

@@ -19,7 +19,8 @@ import {
   View,
 } from "react-native";
 import { auth, db } from "../lib/firebase";
-import { normalizePhoneForAuth } from "../lib/validations";
+import { normalizePhoneForAuth, normalizePhoneForTwilio } from "../lib/validations";
+import { lookupEmailIndex } from "../lib/emailIndex";
 import i18n from "../locales/i18n";
 import { useAuth } from "../context/AuthContext";
 
@@ -80,7 +81,7 @@ const SignInScreen = () => {
 
       // If phone number, normalize the same way as signup so auth email matches
       if (!isEmail) {
-        const normalizedPhone = normalizePhoneForAuth(emailOrPhone);
+        const normalizedPhone = normalizePhoneForAuth(normalizePhoneForTwilio(emailOrPhone));
         authEmail = `user_${normalizedPhone}@forsa.app`;
       } else {
         // User entered an email - try direct authentication first (for admin accounts)
@@ -89,29 +90,58 @@ const SignInScreen = () => {
       }
 
       // Sign in with Firebase Auth
-      // Note: With strict Firestore rules (no public access), we MUST NOT query `/users`
-      // before authentication (request.auth would be null and Firestore will correctly deny it).
       let userCredential: any;
-      try {
-        userCredential = await signInWithEmailAndPassword(auth, authEmail, password);
-      } catch (error: any) {
-        // If this is an email input, we only support direct email/password sign-in (typically admin accounts).
-        // Regular users created with phone-based auth email (`user_{phone}@forsa.app`) should sign in via phone number.
-        if (
-          isEmail &&
-          (error?.code === "auth/invalid-credential" ||
-            error?.code === "auth/user-not-found" ||
-            error?.code === "auth/wrong-password")
-        ) {
-          const e = new Error(
-            "Invalid credentials. If you registered using your phone number, please sign in using your phone number instead of email."
-          ) as any;
-          e.code = error?.code;
+      const digits = emailOrPhone.replace(/\D/g, "");
+
+      // We try multiple identifier formats to ensure legacy profiles still work
+      const possibleAuthEmails = isEmail
+        ? [authEmail]
+        : [
+          `user_${digits}@forsa.app`,       // New Universal Format
+          `user_+${digits}@forsa.app`,      // Old Legacy Format
+          `user_20${digits.startsWith('0') ? digits.substring(1) : digits}@forsa.app` // Temporary Format
+        ];
+
+      let lastError: any;
+      for (const attemptEmail of possibleAuthEmails) {
+        try {
+          console.log("🔑 Attempting login with:", attemptEmail);
+          userCredential = await signInWithEmailAndPassword(auth, attemptEmail, password);
+          authEmail = attemptEmail; // Success!
+          lastError = null;
+          break;
+        } catch (error: any) {
+          lastError = error;
+          // Continue to next format if not found
+          if (error.code !== "auth/user-not-found" && error.code !== "auth/invalid-credential") {
+            break; // If it's a wrong password, no point in trying other formats
+          }
+        }
+      }
+
+      // If all phone formats fail, try email mapping lookup
+      if (!userCredential && isEmail) {
+        const indexedAuthEmail = await lookupEmailIndex(emailOrPhone);
+        if (indexedAuthEmail) {
+          console.log("🔗 Found email mapping! Attempting login with:", indexedAuthEmail);
+          try {
+            userCredential = await signInWithEmailAndPassword(auth, indexedAuthEmail, password);
+            authEmail = indexedAuthEmail;
+            lastError = null;
+          } catch (error: any) {
+            lastError = error;
+          }
+        }
+      }
+
+      // If still no luck, throw the last error
+      if (!userCredential) {
+        if (isEmail && !lastError?.message.includes("linked")) {
+          const e = new Error(`No account linked to "${emailOrPhone}". Please check your spelling or use your phone number.`) as any;
+          e.code = "auth/user-not-found";
           throw e;
         }
-
-        // Re-throw (outer catch maps firebase error codes to messages)
-        throw error;
+        throw lastError;
       }
 
       const user = userCredential.user;
@@ -171,7 +201,7 @@ const SignInScreen = () => {
             Alert.alert("Error", "Unknown role");
         }
       }
-      
+
     } catch (err: any) {
       let errorMessage = i18n.t("loginFailed") || "Login failed";
       if (err.code === "auth/user-not-found") {

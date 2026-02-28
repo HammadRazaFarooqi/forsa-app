@@ -23,13 +23,15 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { uploadImageToStorage } from '../lib/firebaseHelpers';
+import { writeEmailIndex } from '../lib/emailIndex';
 import {
-  validateEmail,
-  validatePhone,
-  validatePassword,
-  validateName,
   validateCity,
+  validateEmail,
+  validatePassword,
+  validatePhone,
+  validateName,
   normalizePhoneForAuth,
+  normalizePhoneForTwilio,
 } from '../lib/validations';
 import i18n from '../locales/i18n';
 // OTP functionality commented out - direct Firebase signup enabled
@@ -162,10 +164,11 @@ const SignupAgent = () => {
       setFormError('');
 
       // Step 1: Create Firebase Auth user directly (no OTP)
-      const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
+      const normalizedPhone = normalizePhoneForTwilio(phone);
       const phoneForAuth = normalizePhoneForAuth(normalizedPhone);
       const authEmail = `user_${phoneForAuth}@forsa.app`;
-      
+      const userEmailForIndex = email && email.trim().length > 0 ? email.trim() : null;
+
       // console.log('[Signup] Creating Firebase user with email:', authEmail);
       const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
       const user = userCredential.user;
@@ -195,7 +198,12 @@ const SignupAgent = () => {
       };
       await setDoc(doc(db, 'users', uid), userData, { merge: true });
       await setDoc(doc(db, 'agents', uid), userData);
-      
+
+      // Save email → authEmail mapping for email-based login
+      if (userEmailForIndex) {
+        await writeEmailIndex(userEmailForIndex, authEmail);
+      }
+
       // Step 4: User is already signed in, redirect to dashboard
       // console.log('[Signup] User is logged in and navigating to agent-feed...');
       router.replace('/agent-feed');

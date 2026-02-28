@@ -24,6 +24,7 @@ import {
 } from 'react-native';
 import { uploadImageToStorage } from '../lib/firebaseHelpers';
 import { auth, db } from '../lib/firebase';
+import { writeEmailIndex } from '../lib/emailIndex';
 import {
   validateCity,
   validateEmail,
@@ -32,6 +33,7 @@ import {
   validatePhone,
   validateRequired,
   normalizePhoneForAuth,
+  normalizePhoneForTwilio,
 } from '../lib/validations';
 import i18n from '../locales/i18n';
 // OTP functionality commented out - direct Firebase signup enabled
@@ -267,10 +269,10 @@ const SignupPlayer = () => {
       setFormError('');
 
       // Step 1: Create Firebase Auth user directly (no OTP)
-      const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
+      const normalizedPhone = normalizePhoneForTwilio(phone);
       const phoneForAuth = normalizePhoneForAuth(normalizedPhone);
       const authEmail = `user_${phoneForAuth}@forsa.app`;
-      
+
       // console.log('[Signup] Creating Firebase user with email:', authEmail);
       const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
       const user = userCredential.user;
@@ -311,6 +313,11 @@ const SignupPlayer = () => {
       // console.log('[Signup] Saving to Firestore...');
       await setDoc(doc(db, 'users', uid), userData, { merge: true });
       await setDoc(doc(db, 'players', uid), { ...userData, highlightVideo: highlightVideo || '' });
+
+      // Save email → authEmail mapping for email-based login
+      if (email && email.trim().length > 0) {
+        await writeEmailIndex(email.trim(), authEmail);
+      }
       // console.log('[Signup] Firestore saved! User is logged in and navigating to player-feed...');
 
       // Step 4: Generate check-in code (non-blocking)

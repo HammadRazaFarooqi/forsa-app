@@ -3,6 +3,10 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { doc, setDoc } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { writeEmailIndex } from '../lib/emailIndex';
+import { normalizePhoneForAuth } from '../lib/validations';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -21,7 +25,6 @@ import {
   View
 } from 'react-native';
 import { uploadImageToStorage } from '../lib/firebaseHelpers';
-import { db } from '../lib/firebase';
 import {
   validateAddress,
   validateCity,
@@ -29,9 +32,9 @@ import {
   validatePassword,
   validatePhone,
   validateRequired,
+  normalizePhoneForTwilio
 } from '../lib/validations';
 import i18n from '../locales/i18n';
-import OtpModal from '../components/OtpModal';
 import { getBackendUrl } from '../lib/config';
 
 const SignupAcademy = () => {
@@ -52,8 +55,6 @@ const SignupAcademy = () => {
   const [missing, setMissing] = useState<{ [key: string]: boolean }>({});
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [showOtpModal, setShowOtpModal] = useState(false);
-  const [otpPhone, setOtpPhone] = useState('');
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
 
   const cityOptions = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>).map(([key, label]) => ({ key, label }));
@@ -157,39 +158,22 @@ const SignupAcademy = () => {
     try {
       setLoading(true);
       setFormError('');
-      const normalizedPhone = phone.startsWith('+') ? phone : `+${phone}`;
-      const backendUrl = getBackendUrl(); // Get dynamic IP at runtime
-      const otpRes = await fetch(`${backendUrl}/api/auth/send-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: normalizedPhone, role: 'academy' }),
-      });
-      const otpData = await otpRes.json();
-      if (!otpRes.ok || !otpData.success) {
-        const msg = otpData.error?.message || 'Failed to send OTP';
-        setFormError(msg);
-        Alert.alert('Error', msg);
-        return;
-      }
-      setOtpPhone(normalizedPhone);
-      setShowOtpModal(true);
-    } catch (err: any) {
-      const msg = err.message || i18n.t('signupFailedMessage');
-      setFormError(msg);
-      Alert.alert(i18n.t('signupFailed'), msg);
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handleOtpVerified = async (uid: string, _token: string, _refreshToken: string) => {
-    setShowOtpModal(false);
-    try {
-      setLoading(true);
+      // Step 1: Create Firebase Auth user
+      const normalizedPhone = normalizePhoneForTwilio(phone);
+      const phoneForAuth = normalizePhoneForAuth(normalizedPhone);
+      const authEmail = `user_${phoneForAuth}@forsa.app`;
+
+      const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
+      const uid = userCredential.user.uid;
+
+      // Step 2: Upload profile photo
       let profilePhotoUrl = '';
       if (profileImage) {
         profilePhotoUrl = await uploadImageToStorage(profileImage, `users/${uid}/profile.jpg`);
       }
+
+      // Step 3: Save extended profile to Firestore
       const userData = {
         uid,
         role: 'academy',
@@ -206,9 +190,25 @@ const SignupAcademy = () => {
       };
       await setDoc(doc(db, 'users', uid), userData, { merge: true });
       await setDoc(doc(db, 'academies', uid), userData);
+
+      // Save email → authEmail mapping
+      if (email && email.trim().length > 0) {
+        await writeEmailIndex(email.trim(), authEmail);
+      }
+
       router.replace('/academy-feed');
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to save profile data');
+      console.log('[Signup] Error:', err.message);
+      let errorMsg = i18n.t('signupFailedMessage');
+      if (err.code === 'auth/email-already-in-use') {
+        errorMsg = i18n.t('emailAlreadyRegistered') || 'This phone number is already registered';
+      } else if (err.code === 'auth/weak-password') {
+        errorMsg = i18n.t('weakPassword') || 'Password is too weak';
+      } else if (err.message) {
+        errorMsg = err.message;
+      }
+      setFormError(errorMsg);
+      Alert.alert(i18n.t('signupFailed'), errorMsg);
     } finally {
       setLoading(false);
     }
@@ -222,16 +222,6 @@ const SignupAcademy = () => {
         style={styles.gradient}
       >
         <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
-          {/* OTP Modal */}
-          <OtpModal
-            visible={showOtpModal}
-            phone={otpPhone}
-            password={password}
-            role="academy"
-            email={email && email.trim().length > 0 ? email.trim() : undefined}
-            onClose={() => setShowOtpModal(false)}
-            onVerified={handleOtpVerified}
-          />
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity style={styles.backButton} onPress={handleBack}>

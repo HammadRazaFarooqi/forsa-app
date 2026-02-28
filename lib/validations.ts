@@ -12,6 +12,24 @@ export function normalizePhoneForAuth(phone: string): string {
   return phone.replace(/\D/g, '');
 }
 
+/**
+ * Robust normalization for Auth IDs.
+ * Simply extracts all digits to create a unique identifier.
+ * This works for any country as long as the user enters the same digits.
+ */
+export function normalizePhoneForTwilio(phone: string): string {
+  // We keep the name "normalizePhoneForTwilio" for now to avoid 
+  // breaking existing imports, but the logic is now country-agnostic.
+  if (!phone) return "";
+
+  // Extract only digits
+  const digits = phone.replace(/\D/g, "");
+
+  // Return consistent digit string. 
+  // (e.g., "0300..." stays "0300...", "+92300..." stays "92300...")
+  return digits;
+}
+
 export const validateEmail = (email: string): string | null => {
   if (!email) {
     return 'Email is required';
@@ -29,12 +47,12 @@ export const validatePhone = (phone: string): string | null => {
   }
   // Remove spaces, dashes, parentheses, and other formatting characters
   const cleaned = phone.replace(/[\s\-\(\)\.]/g, '');
-  
+
   // Check if it contains only digits and optional + at the start
   // International phone numbers can start with + (country code)
   // Minimum 7 digits, maximum 15 digits (ITU-T E.164 standard)
   const phoneRegex = /^\+?[0-9]{7,15}$/;
-  
+
   if (!phoneRegex.test(cleaned)) {
     // More specific error messages
     if (cleaned.length < 7) {
@@ -96,11 +114,11 @@ export const validateDOB = (day: string, month: string, year: string): string | 
   const dayNum = parseInt(day, 10);
   const monthNum = parseInt(month, 10);
   const yearNum = parseInt(year, 10);
-  
+
   if (isNaN(dayNum) || isNaN(monthNum) || isNaN(yearNum)) {
     return 'Please enter a valid date';
   }
-  
+
   // Check if date is valid
   const date = new Date(yearNum, monthNum - 1, dayNum);
   if (
@@ -110,14 +128,14 @@ export const validateDOB = (day: string, month: string, year: string): string | 
   ) {
     return 'Please enter a valid date';
   }
-  
+
   // Check if age is reasonable (between 5 and 100 years)
   const today = new Date();
   const age = today.getFullYear() - yearNum;
   if (age < 5 || age > 100) {
     return 'Please enter a valid date of birth';
   }
-  
+
   return null;
 };
 

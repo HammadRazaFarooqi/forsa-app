@@ -51,7 +51,10 @@ service cloud.firestore {
       allow list: if isAuthed();
 
       // Writes: own doc only; admin can write all
-      allow create, update: if isAuthed() && (request.auth.uid == uid || isAdmin());
+      allow create: if isAuthed() && (request.auth.uid == uid || isAdmin());
+      allow update: if isAuthed() 
+        && (request.auth.uid == uid || isAdmin())
+        && (isAdmin() || request.resource.data.role == resource.data.role); // Role immutable for non-admins
       allow delete: if isAdmin();
     }
 
@@ -217,12 +220,15 @@ service cloud.firestore {
       );
       allow list: if isAuthed();
 
-      // Create: only academy/clinic (based on role stored in /users/{uid})
+      // Create: only academy/clinic, must start as 'pending'
       allow create: if isAuthed()
         && (hasRole('academy') || hasRole('clinic'))
-        && request.resource.data.createdBy == request.auth.uid;
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll(['userId', 'createdBy', 'status', 'createdAt']);
 
-      allow update: if false;
+      // Update: ONLY admin can change status or other fields
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 
