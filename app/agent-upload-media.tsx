@@ -8,6 +8,7 @@ import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
 import { uploadAndSaveMedia, ResourceType } from '../services/MediaService';
+import { getCurrentUserRole } from '../services/UserRoleService';
 
 export default function AgentUploadMedia() {
   const router = useRouter();
@@ -102,9 +103,16 @@ export default function AgentUploadMedia() {
           [
             {
               text: 'OK',
-              onPress: () => {
+              onPress: async () => {
                 setMedia([]);
-                router.back();
+                try {
+                  const role = await getCurrentUserRole();
+                  const feedRoute = `/${role}-feed`;
+                  router.replace(feedRoute as any);
+                } catch (error) {
+                  console.error('Error getting user role, redirecting to agent feed:', error);
+                  router.replace('/agent-feed' as any);
+                }
               },
             },
           ]

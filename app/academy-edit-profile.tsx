@@ -1,13 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { getApp } from 'firebase/app';
-import { doc, getDoc, getFirestore } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
+import { auth, db } from '../lib/firebase';
+import { uploadMedia } from '../services/MediaService';
+import * as ImagePicker from 'expo-image-picker';
 
 const AGE_GROUPS = Array.from({ length: 11 }, (_, i) => (7 + i).toString());
 
@@ -20,10 +22,12 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
   const [settingAge, setSettingAge] = useState<string | null>(null);
   const { openMenu } = useHamburgerMenu();
   const [profilePic, setProfilePic] = useState<string | null>(null);
+  const [profilePicUrl, setProfilePicUrl] = useState<string | null>(null);
   const [address, setAddress] = useState('');
   const [editingAddress, setEditingAddress] = useState(false);
   const [contactPerson, setContactPerson] = useState('');
   const [editingContactPerson, setEditingContactPerson] = useState(false);
+  const [saving, setSaving] = useState(false);
   const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -41,10 +45,13 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
       setLoading(true);
       setFetchError(null);
       try {
-        const app = getApp();
-        const db = getFirestore(app);
-        const name = academyName || 'DefaultAcademy';
-        const docRef = doc(db, 'academies', name);
+        const user = auth.currentUser;
+        if (!user) {
+          setLoading(false);
+          return;
+        }
+
+        const docRef = doc(db, 'academies', user.uid);
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = docSnap.data();
@@ -52,7 +59,10 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
             setPrices(data.prices);
             setSelected(Object.keys(data.prices));
           }
-          if (data && data.profilePic) setProfilePic(data.profilePic);
+          if (data && data.profilePic) {
+            setProfilePic(data.profilePic);
+            setProfilePicUrl(data.profilePic);
+          }
           if (data && data.address) setAddress(data.address);
           if (data && data.contactPerson) setContactPerson(data.contactPerson);
         }
@@ -63,7 +73,7 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
       }
     }
     fetchPrices();
-  }, [academyName]);
+  }, []);
 
   const handleSetAge = (age: string) => {
     setSettingAge(age);
@@ -79,6 +89,68 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
   };
   const handleEditPrice = (age: string, value: string) => {
     setPrices({ ...prices, [age]: value });
+  };
+
+  const handlePickPhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      setProfilePic(result.assets[0].uri);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert(i18n.t('error') || 'Error', 'User not authenticated');
+        setSaving(false);
+        return;
+      }
+
+      let finalProfilePicUrl = profilePicUrl;
+
+      // Upload profile photo if it's a new local image
+      if (profilePic && profilePic !== profilePicUrl && 
+          (profilePic.startsWith('file://') || profilePic.startsWith('content://'))) {
+        try {
+          const cloudinaryResponse = await uploadMedia(profilePic, 'image');
+          finalProfilePicUrl = cloudinaryResponse.secure_url;
+          setProfilePicUrl(finalProfilePicUrl);
+        } catch (error) {
+          console.error('Error uploading profile photo:', error);
+          Alert.alert(i18n.t('error') || 'Error', 'Failed to upload profile photo');
+          setSaving(false);
+          return;
+        }
+      }
+
+      const updateData: any = {
+        prices,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (address) updateData.address = address;
+      if (contactPerson) updateData.contactPerson = contactPerson;
+      if (finalProfilePicUrl) updateData.profilePic = finalProfilePicUrl;
+
+      // Update both 'academies' and 'users' collections
+      await updateDoc(doc(db, 'academies', user.uid), updateData);
+      await updateDoc(doc(db, 'users', user.uid), updateData);
+
+      Alert.alert(i18n.t('success') || 'Success', i18n.t('profileUpdated') || 'Profile updated successfully');
+      router.back();
+    } catch (error) {
+      console.error('Error updating academy profile:', error);
+      Alert.alert(i18n.t('error') || 'Error', 'Failed to update profile');
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) {
@@ -123,12 +195,10 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
             <View style={styles.formCard}>
               {/* Profile Picture */}
               <View style={styles.profileSection}>
-                <TouchableOpacity onPress={() => {/* TODO: open image picker */}} style={styles.profileImageContainer}>
+                <TouchableOpacity onPress={handlePickPhoto} style={styles.profileImageContainer}>
                   {profilePic ? (
-                    <View style={styles.profileImageWrapper}>
-                      <Ionicons name="image" size={48} color="#fff" />
-          </View>
-        ) : (
+                    <Image source={{ uri: profilePic }} style={styles.profileImage} />
+                  ) : (
                     <View style={styles.profileImagePlaceholder}>
                       <Ionicons name="camera" size={32} color="#999" />
                     </View>
@@ -137,7 +207,7 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
                     <Ionicons name="camera" size={16} color="#fff" />
             </View>
           </TouchableOpacity>
-        <TouchableOpacity onPress={() => {/* TODO: open image picker */}}>
+        <TouchableOpacity onPress={handlePickPhoto}>
                   <Text style={styles.changeProfileText}>{i18n.t('changeProfilePicture')}</Text>
         </TouchableOpacity>
       </View>
@@ -258,8 +328,12 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
       </View>
               </View>
 
-              <TouchableOpacity style={styles.saveButton} activeOpacity={0.8}>
-                <Text style={styles.saveButtonText}>{i18n.t('save') || 'Save'}</Text>
+              <TouchableOpacity style={styles.saveButton} activeOpacity={0.8} onPress={handleSave} disabled={saving}>
+                {saving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>{i18n.t('save') || 'Save'}</Text>
+                )}
       </TouchableOpacity>
             </View>
     </ScrollView>
@@ -331,13 +405,10 @@ const styles = StyleSheet.create({
     position: 'relative',
     marginBottom: 12,
   },
-  profileImageWrapper: {
+  profileImage: {
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
     borderWidth: 4,
     borderColor: '#fff',
   },

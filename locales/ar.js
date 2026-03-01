@@ -292,6 +292,8 @@ export default {
   mediaUploaded: "تم رفع الوسائط بنجاح!",
   feed: 'المنشورات',
   noPosts: 'لا توجد منشورات بعد.',
+  allPosts: 'جميع المنشورات',
+  userHasNoPosts: 'لم ينشر هذا المستخدم أي شيء بعد',
   searchAgentsAcademies: 'بحث عن وكلاء أو أكاديميات',
   messages: 'الرسائل',
   uploadMedia: 'رفع الوسائط',
@@ -823,4 +825,9 @@ export default {
   newBookingRequest: "طلب حجز جديد",
   requestedBooking: "طلب حجز",
   bookingRequestSent: "تم إرسال طلب الحجز",
+  showFavoritesOnly: "إظهار المفضلة فقط",
+  clearFilters: "مسح المرشحات",
+  comingSoon: "قريباً",
+  comingSoonMessage: "هذه الميزة قريباً!",
+  ok: "موافق",
 };

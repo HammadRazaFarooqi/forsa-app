@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { collection, onSnapshot, getFirestore, orderBy, query, where, doc, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, orderBy, doc, getDoc } from 'firebase/firestore';
 import React, { useRef, useState, useEffect } from 'react';
 import { ActivityIndicator, Animated, Easing, FlatList, Image, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
@@ -11,10 +11,9 @@ import PostActionsMenu from '../components/PostActionsMenu';
 import i18n from '../locales/i18n';
 import { db, auth } from '../lib/firebase';
 
-// Helper function to get user name from role-specific collection
-async function getUserName(ownerId: string, ownerRole: string): Promise<string> {
+// Helper function to get user profile data
+async function getUserProfileData(userId: string, role: string) {
   try {
-    // Map role to collection name
     const roleCollectionMap: { [key: string]: string } = {
       'player': 'players',
       'parent': 'parents',
@@ -23,63 +22,58 @@ async function getUserName(ownerId: string, ownerRole: string): Promise<string> 
       'agent': 'agents'
     };
 
-    const collectionName = roleCollectionMap[ownerRole] || 'users';
+    const collectionName = roleCollectionMap[role] || 'users';
     
     // Try role-specific collection first
     if (collectionName !== 'users') {
-      const roleDocRef = doc(db, collectionName, ownerId);
+      const roleDocRef = doc(db, collectionName, userId);
       const roleDocSnap = await getDoc(roleDocRef);
       
       if (roleDocSnap.exists()) {
-        const data = roleDocSnap.data();
-        // Get name based on role
-        if (ownerRole === 'player') {
-          const firstName = data.firstName || '';
-          const lastName = data.lastName || '';
-          return firstName && lastName ? `${firstName} ${lastName}` : firstName || lastName || 'Unknown';
-        } else if (ownerRole === 'parent') {
-          return data.parentName || data.name || 'Unknown';
-        } else if (ownerRole === 'academy') {
-          return data.academyName || data.name || 'Unknown';
-        } else if (ownerRole === 'clinic') {
-          return data.clinicName || data.name || 'Unknown';
-        } else if (ownerRole === 'agent') {
-          const firstName = data.firstName || '';
-          const lastName = data.lastName || '';
-          return firstName && lastName ? `${firstName} ${lastName}` : firstName || lastName || 'Unknown';
-        }
+        return roleDocSnap.data();
       }
     }
 
     // Fallback to users collection
-    const userDocRef = doc(db, 'users', ownerId);
+    const userDocRef = doc(db, 'users', userId);
     const userDocSnap = await getDoc(userDocRef);
     
     if (userDocSnap.exists()) {
-      const data = userDocSnap.data();
-      if (data.firstName && data.lastName) {
-        return `${data.firstName} ${data.lastName}`;
-      }
-      return data.firstName || data.lastName || data.name || data.parentName || data.academyName || data.clinicName || 'Unknown';
+      return userDocSnap.data();
     }
 
-    return 'Unknown';
+    return null;
   } catch (error) {
-    console.error('Error fetching user name:', error);
-    return 'Unknown';
+    console.error('Error fetching user profile:', error);
+    return null;
   }
 }
 
-export default function AgentFeedScreen() {
+function getAge(dob?: string): number | null {
+  if (!dob) return null;
+  const parts = dob.split('-');
+  if (parts.length !== 3) return null;
+  const year = parseInt(parts[2], 10);
+  if (isNaN(year)) return null;
+  const now = new Date();
+  return now.getFullYear() - year;
+}
+
+const getPositionLabel = (pos: string) => i18n.locale === 'ar' && i18n.t(`positions.${pos}`) ? i18n.t(`positions.${pos}`) : pos;
+const getCityLabel = (cityKey: string) => cityKey ? (i18n.t(`cities.${cityKey}`) || cityKey) : '';
+
+export default function AgentUserPostsScreen() {
   const router = useRouter();
   const { openMenu } = useHamburgerMenu();
-  const [feed, setFeed] = React.useState<any[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [userNames, setUserNames] = React.useState<{ [key: string]: string }>({});
-  const [fullScreenMedia, setFullScreenMedia] = React.useState<{ uri: string; type: 'image' | 'video' } | null>(null);
+  const params = useLocalSearchParams<{ ownerId: string; ownerRole: string; userName: string }>();
+  const [posts, setPosts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [profileData, setProfileData] = useState<any>(null);
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [fullScreenMedia, setFullScreenMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
-  React.useEffect(() => {
+  useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: 1,
       duration: 600,
@@ -88,143 +82,98 @@ export default function AgentFeedScreen() {
     }).start();
   }, []);
 
-  React.useEffect(() => {
-    setLoading(true);
-    
+  useEffect(() => {
+    if (!params.ownerId) {
+      setLoading(false);
+      setLoadingProfile(false);
+      return;
+    }
+
     // Check if user is authenticated before setting up listener
     const user = auth.currentUser;
     if (!user) {
-      setFeed([]);
       setLoading(false);
+      setLoadingProfile(false);
+      setPosts([]);
+      setProfileData(null);
       return;
     }
-    
-    const db = getFirestore();
+
+    // Fetch user profile data
+    const fetchProfile = async () => {
+      setLoadingProfile(true);
+      try {
+        // Check authentication again before fetching
+        if (!auth.currentUser) {
+          setProfileData(null);
+          return;
+        }
+        const data = await getUserProfileData(params.ownerId, params.ownerRole || 'player');
+        setProfileData(data);
+      } catch (error) {
+        // Only log error if user is still authenticated
+        if (auth.currentUser) {
+          console.error('Error fetching profile:', error);
+        }
+        setProfileData(null);
+      } finally {
+        setLoadingProfile(false);
+      }
+    };
+    fetchProfile();
+
+    // Fetch posts
+    setLoading(true);
     const postsRef = collection(db, 'posts');
     
-    // Agent feed: Show posts where visibleToRoles array-contains "agent" AND status == "active"
+    // Query posts by ownerId only (without status filter to avoid composite index requirement)
+    // We'll filter by status client-side
     const q = query(
       postsRef,
-      where('visibleToRoles', 'array-contains', 'agent'),
-      where('status', '==', 'active'),
+      where('ownerId', '==', params.ownerId),
       orderBy('timestamp', 'desc')
     );
 
     // Set up real-time listener
     const unsubscribe = onSnapshot(
       q,
-      async (querySnapshot) => {
-        const posts = querySnapshot.docs.map(doc => ({ 
-          id: doc.id, 
-          ...doc.data() 
-        }));
-        setFeed(posts);
+      (querySnapshot) => {
+        // Check authentication before processing
+        if (!auth.currentUser) {
+          setPosts([]);
+          setLoading(false);
+          return;
+        }
         
-        // Fetch user names for all posts
-        const namePromises = posts.map(async (post: any) => {
-          if (post.ownerId && post.ownerRole) {
-            const name = await getUserName(post.ownerId, post.ownerRole);
-            return { key: post.ownerId, name };
-          }
-          return null;
-        });
-        
-        const nameResults = await Promise.all(namePromises);
-        const namesMap: { [key: string]: string } = {};
-        nameResults.forEach(result => {
-          if (result) {
-            namesMap[result.key] = result.name;
-          }
-        });
-        setUserNames(namesMap);
+        const userPosts = querySnapshot.docs
+          .map(doc => ({ 
+            id: doc.id, 
+            ...doc.data() 
+          }))
+          // Filter out deleted/inactive posts client-side
+          .filter((post: any) => !post.status || post.status === 'active');
+        setPosts(userPosts);
         setLoading(false);
       },
       (error) => {
-        // Check if user is still authenticated before attempting fallback
-        if (!auth.currentUser) {
-          setFeed([]);
-          setLoading(false);
-          return;
-        }
-        
         // Check if error is due to permissions (user logged out)
         if (error.code === 'permission-denied' || error.message?.includes('permission')) {
-          console.error('Agent feed listener error (permission denied):', error);
-          setFeed([]);
+          // Silently handle permission errors (user likely logged out)
+          setPosts([]);
           setLoading(false);
           return;
         }
-        
-        console.error('Agent feed listener error:', error);
-        // Fallback: try querying without status filter for backward compatibility
-        const fallbackQ = query(
-          postsRef,
-          where('visibleToRoles', 'array-contains', 'agent'),
-          orderBy('timestamp', 'desc')
-        );
-        
-        let fallbackUnsubscribe: (() => void) | null = null;
-        fallbackUnsubscribe = onSnapshot(
-          fallbackQ,
-          async (snapshot) => {
-            // Check authentication again before processing
-            if (!auth.currentUser) {
-              if (fallbackUnsubscribe) fallbackUnsubscribe();
-              setFeed([]);
-              setLoading(false);
-              return;
-            }
-            
-            const posts = snapshot.docs
-              .map(doc => ({ id: doc.id, ...doc.data() }))
-              .filter((post: any) => !post.status || post.status === 'active');
-            setFeed(posts);
-            
-            // Fetch user names for all posts (only if authenticated)
-            if (auth.currentUser) {
-              const namePromises = posts.map(async (post: any) => {
-                if (post.ownerId && post.ownerRole) {
-                  try {
-                    const name = await getUserName(post.ownerId, post.ownerRole);
-                    return { key: post.ownerId, name };
-                  } catch (err) {
-                    // Silently handle errors when fetching user names
-                    return null;
-                  }
-                }
-                return null;
-              });
-              
-              const nameResults = await Promise.all(namePromises);
-              const namesMap: { [key: string]: string } = {};
-              nameResults.forEach(result => {
-                if (result) {
-                  namesMap[result.key] = result.name;
-                }
-              });
-              setUserNames(namesMap);
-            }
-            setLoading(false);
-          },
-          (fallbackError) => {
-            // Check if error is due to permissions
-            if (fallbackError.code === 'permission-denied' || fallbackError.message?.includes('permission')) {
-              console.error('Agent feed fallback error (permission denied):', fallbackError);
-            } else {
-              console.error('Agent feed fallback error:', fallbackError);
-            }
-            setFeed([]);
-            setLoading(false);
-          }
-        );
+        console.error('Error fetching user posts:', error);
+        setPosts([]);
+        setLoading(false);
       }
     );
 
-    // Cleanup listener on unmount
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+    return () => unsubscribe();
+  }, [params.ownerId, params.ownerRole]);
+
+  const roleLabel = params.ownerRole ? `(${params.ownerRole})` : '';
+  const displayName = `${params.userName || 'User'}${roleLabel}`;
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -235,25 +184,62 @@ export default function AgentFeedScreen() {
         <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
           {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity style={styles.menuButton} onPress={openMenu}>
-              <Ionicons name="menu" size={24} color="#fff" />
-        </TouchableOpacity>
+            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
             <View style={styles.headerContent}>
-              <Text style={styles.headerTitle}>{i18n.t('agentFeed') || 'Feed'}</Text>
-              <Text style={styles.headerSubtitle}>{i18n.t('latestUpdates') || 'Latest updates from players'}</Text>
+              <Text style={styles.headerTitle}>{displayName}</Text>
+              <Text style={styles.headerSubtitle}>{i18n.t('allPosts') || 'All Posts'}</Text>
             </View>
-      </View>
+          </View>
 
-      <HamburgerMenu />
+          {/* Profile Info Card (for players) */}
+          {params.ownerRole === 'player' && profileData && (
+            <View style={styles.profileCard}>
+              <View style={styles.profileHeader}>
+                {profileData.profilePhoto ? (
+                  <Image source={{ uri: profileData.profilePhoto }} style={styles.profilePhoto} />
+                ) : (
+                  <View style={styles.profilePhotoPlaceholder}>
+                    <Ionicons name="person" size={32} color="#999" />
+                  </View>
+                )}
+                <View style={styles.profileInfo}>
+                  <Text style={styles.profileName}>
+                    {profileData.firstName || ''} {profileData.lastName || ''}
+                  </Text>
+                  <View style={styles.profileDetails}>
+                    {getAge(profileData.dob) && (
+                      <>
+                        <Text style={styles.profileDetail}>{i18n.t('age')}: {getAge(profileData.dob)}</Text>
+                        <Text style={styles.profileDetail}> • </Text>
+                      </>
+                    )}
+                    {profileData.position && (
+                      <Text style={styles.profileDetail}>{getPositionLabel(profileData.position)}</Text>
+                    )}
+                  </View>
+                  {profileData.city && (
+                    <View style={styles.profileLocation}>
+                      <Ionicons name="location" size={14} color="#666" />
+                      <Text style={styles.profileCity}>{getCityLabel(profileData.city)}</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+            </View>
+          )}
 
-      {loading ? (
+          <HamburgerMenu />
+
+          {(loading || loadingProfile) ? (
             <View style={styles.loadingState}>
               <ActivityIndicator size="large" color="#fff" />
               <Text style={styles.loadingText}>{i18n.t('loading') || 'Loading...'}</Text>
             </View>
-      ) : (
-        <FlatList
-          data={feed}
+          ) : (
+            <FlatList
+              data={posts}
               renderItem={({ item }: any) => {
                 const timestamp = item.timestamp?.seconds 
                   ? new Date(item.timestamp.seconds * 1000) 
@@ -261,32 +247,13 @@ export default function AgentFeedScreen() {
                     ? new Date(item.createdAt.seconds * 1000)
                     : null;
 
-                const userName = userNames[item.ownerId] || item.author || 'User';
-                const roleLabel = item.ownerRole ? `(${item.ownerRole})` : '';
-                const displayName = `${userName}${roleLabel}`;
-
                 return (
                   <View style={styles.feedCard}>
                     <View style={styles.feedHeader}>
-                      <TouchableOpacity 
-                        style={styles.feedAuthorContainer}
-                        onPress={() => {
-                          if (item.ownerId && item.ownerRole) {
-                            router.push({
-                              pathname: '/agent-user-posts',
-                              params: {
-                                ownerId: item.ownerId,
-                                ownerRole: item.ownerRole,
-                                userName: userName
-                              }
-                            });
-                          }
-                        }}
-                        activeOpacity={0.7}
-                      >
+                      <View style={styles.feedAuthorContainer}>
                         <Ionicons name="person-circle-outline" size={24} color="#000" />
                         <Text style={styles.feedAuthor}>{displayName}</Text>
-                      </TouchableOpacity>
+                      </View>
                       <View style={styles.feedHeaderRight}>
                         {timestamp && (
                           <Text style={styles.feedTime}>
@@ -337,15 +304,15 @@ export default function AgentFeedScreen() {
                   </View>
                 );
               }}
-          keyExtractor={item => item.id}
+              keyExtractor={item => item.id}
               contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <Ionicons name="newspaper-outline" size={64} color="#666" />
                   <Text style={styles.emptyText}>{i18n.t('noPosts') || 'No posts yet'}</Text>
-                  <Text style={styles.emptySubtext}>{i18n.t('beFirstToPost') || 'Be the first to share something!'}</Text>
-    </View>
+                  <Text style={styles.emptySubtext}>{i18n.t('userHasNoPosts') || 'This user has not posted anything yet'}</Text>
+                </View>
               }
             />
           )}
@@ -407,7 +374,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  menuButton: {
+  backButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -419,8 +386,8 @@ const styles = StyleSheet.create({
   headerContent: {
     flex: 1,
     alignItems: 'center',
-    marginLeft: -44, // Negative margin to center title while keeping menu button on left
-    paddingHorizontal: 44, // Add padding to ensure title doesn't overlap with menu button
+    marginLeft: -44,
+    paddingHorizontal: 44,
   },
   headerTitle: {
     fontSize: 28,
@@ -526,6 +493,66 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.6)',
     marginTop: 8,
   },
+  profileCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    marginHorizontal: 24,
+    marginBottom: 16,
+    marginTop: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  profilePhoto: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginRight: 16,
+    backgroundColor: '#f0f0f0',
+  },
+  profilePhotoPlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginRight: 16,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profileInfo: {
+    flex: 1,
+  },
+  profileName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+    marginBottom: 8,
+  },
+  profileDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  profileDetail: {
+    fontSize: 14,
+    color: '#666',
+  },
+  profileLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  profileCity: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 4,
+  },
   fullScreenButton: {
     position: 'absolute',
     bottom: 12,
@@ -573,3 +600,4 @@ const styles = StyleSheet.create({
     height: '100%',
   },
 });
+

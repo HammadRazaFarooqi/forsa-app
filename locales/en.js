@@ -219,6 +219,8 @@ export default {
   mediaUploaded: "Media uploaded successfully!",
   feed: 'Feed',
   noPosts: 'No posts yet.',
+  allPosts: 'All Posts',
+  userHasNoPosts: 'This user has not posted anything yet',
   searchAgentsAcademies: 'Search Agents/Academies',
   messages: 'Messages',
   uploadMedia: 'Upload Media',
@@ -767,4 +769,9 @@ export default {
   newBookingRequest: "New booking request",
   requestedBooking: "requested a booking",
   bookingRequestSent: "Booking request sent",
+  showFavoritesOnly: "Show Favourites Only",
+  clearFilters: "Clear Filters",
+  comingSoon: "Coming Soon",
+  comingSoonMessage: "This feature is coming soon!",
+  ok: "OK",
 };

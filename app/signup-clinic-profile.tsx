@@ -24,7 +24,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { uploadImageToStorage } from '../lib/firebaseHelpers';
+import { uploadMedia } from '../services/MediaService';
 // import { db } from '../lib/firebase'; // Already imported above
 import {
   validateAddress,
@@ -221,10 +221,16 @@ const SignupClinic = () => {
       const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
       const uid = userCredential.user.uid;
 
-      // Step 2: Upload profile photo
+      // Step 2: Upload profile photo to Cloudinary
       let profilePhotoUrl = '';
       if (profileImage) {
-        profilePhotoUrl = await uploadImageToStorage(profileImage, `users/${uid}/profile.jpg`);
+        try {
+          const cloudinaryResponse = await uploadMedia(profileImage, 'image');
+          profilePhotoUrl = cloudinaryResponse.secure_url;
+        } catch (error: any) {
+          console.error('Error uploading profile photo:', error);
+          throw new Error('Failed to upload profile photo. Please try again.');
+        }
       }
 
       // Step 3: Prepare and save data

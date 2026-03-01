@@ -1,13 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { collection, getDocs, getFirestore, orderBy, query, where } from 'firebase/firestore';
+import { collection, getDocs, getFirestore, query, where, doc, getDoc } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, Alert } from 'react-native';
+import { Animated, Easing, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, Alert, ActivityIndicator } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import SimpleSelect from '../components/SimpleSelect';
 import i18n from '../locales/i18n';
 import { startConversationWithUser } from '../services/BookingMessagingService';
+import { db } from '../lib/firebase';
 
 // Define the Player type for type safety
 interface Player {
@@ -74,25 +75,60 @@ export default function AgentPlayersScreen() {
     const fetchPlayers = async () => {
       setLoading(true);
       try {
-        const db = getFirestore();
-        // Fetch from 'users' collection where role is 'player' to ensure we get everyone
+        // Fetch from 'users' collection where role is 'player'
         const usersRef = collection(db, 'users');
         const q = query(
           usersRef,
           where('role', '==', 'player')
-          // Removed orderBy('createdAt') to avoid index requirements and missing field filtering
         );
 
         const querySnapshot = await getDocs(q);
-        const playersData = querySnapshot.docs.map(doc => {
-          const data = doc.data() as Player;
+        
+        // Fetch detailed data from 'players' collection for each user
+        const playersDataPromises = querySnapshot.docs.map(async (userDoc) => {
+          const userData = userDoc.data();
+          const userId = userDoc.id;
+          
+          // Try to get detailed data from 'players' collection
+          try {
+            const playerDocRef = doc(db, 'players', userId);
+            const playerDocSnap = await getDoc(playerDocRef);
+            
+            if (playerDocSnap.exists()) {
+              const playerData = playerDocSnap.data();
+              return {
+                id: userId,
+                firstName: playerData.firstName || userData.firstName || '',
+                lastName: playerData.lastName || userData.lastName || '',
+                email: playerData.email || userData.email || '',
+                position: playerData.position || userData.position || '',
+                city: playerData.city || userData.city || '',
+                dob: playerData.dob || userData.dob || '',
+                profilePhoto: playerData.profilePhoto || userData.profilePhoto || null,
+                pinnedVideo: playerData.pinnedVideo || playerData.highlightVideo || null,
+                createdAt: playerData.createdAt || userData.createdAt || null,
+              } as Player;
+            }
+          } catch (error) {
+            console.error(`Error fetching player details for ${userId}:`, error);
+          }
+          
+          // Fallback to user data if player doc doesn't exist
           return {
-            ...data,
-            id: doc.id,
-            // Normalize video field: check pinnedVideo first, then highlightVideo
-            pinnedVideo: data.pinnedVideo || data.highlightVideo || null
+            id: userId,
+            firstName: userData.firstName || '',
+            lastName: userData.lastName || '',
+            email: userData.email || '',
+            position: userData.position || '',
+            city: userData.city || '',
+            dob: userData.dob || '',
+            profilePhoto: userData.profilePhoto || null,
+            pinnedVideo: userData.pinnedVideo || userData.highlightVideo || null,
+            createdAt: userData.createdAt || null,
           } as Player;
         });
+
+        const playersData = await Promise.all(playersDataPromises);
 
         // Sort in memory to avoid needing a composite index
         const sortedPlayers = playersData.sort((a, b) => {
@@ -111,18 +147,8 @@ export default function AgentPlayersScreen() {
     fetchPlayers();
   }, []);
 
-  // Dummy player always included
-  const dummyPlayer: Player = {
-    id: 'dummy',
-    firstName: 'Ali',
-    lastName: 'Hassan',
-    dob: '15-04-2007',
-    position: 'ST',
-    city: 'cairo',
-  };
-
-  // Filter logic
-  const filteredPlayers = [dummyPlayer, ...players].filter(p => {
+  // Filter logic - no dummy player
+  const filteredPlayers = players.filter(p => {
     if (filters.firstName && !(`${p.firstName}`.toLowerCase().includes(filters.firstName.toLowerCase()))) return false;
     if (filters.lastName && !(`${p.lastName}`.toLowerCase().includes(filters.lastName.toLowerCase()))) return false;
     if (filters.position && p.position !== filters.position) return false;
@@ -255,9 +281,13 @@ export default function AgentPlayersScreen() {
                     <Ionicons name="star" size={24} color="#FFD700" />
                   </TouchableOpacity>
                   <View style={styles.playerHeader}>
-                    <View style={styles.playerIcon}>
-                      <Ionicons name="person" size={24} color="#000" />
-                    </View>
+                    {item.profilePhoto ? (
+                      <Image source={{ uri: item.profilePhoto }} style={styles.playerPhoto} />
+                    ) : (
+                      <View style={styles.playerIcon}>
+                        <Ionicons name="person" size={24} color="#000" />
+                      </View>
+                    )}
                     <View style={styles.playerInfo}>
                       <Text style={styles.playerName}>{item.firstName} {item.lastName}</Text>
                       <View style={styles.playerDetails}>
@@ -271,15 +301,22 @@ export default function AgentPlayersScreen() {
                       </View>
                     </View>
                   </View>
-                  <View style={styles.videoSection}>
-                    <Text style={styles.videoLabel}>{i18n.t('pinnedVideo') || 'Video'}</Text>
-                    <VideoWithNaturalSize uri={item.pinnedVideo || 'https://www.w3schools.com/html/mov_bbb.mp4'} />
-                  </View>
+                  {item.pinnedVideo && (
+                    <View style={styles.videoSection}>
+                      <Text style={styles.videoLabel}>{i18n.t('pinnedVideo') || 'Video'}</Text>
+                      <VideoWithNaturalSize uri={item.pinnedVideo} />
+                    </View>
+                  )}
                 </View>
               </TouchableOpacity>
             )}
             ListEmptyComponent={
-              loading ? null : (
+              loading ? (
+                <View style={styles.emptyState}>
+                  <ActivityIndicator size="large" color="#fff" />
+                  <Text style={styles.emptyText}>{i18n.t('loading') || 'Loading...'}</Text>
+                </View>
+              ) : (
                 <View style={styles.emptyState}>
                   <Ionicons name="people-outline" size={64} color="#666" />
                   <Text style={styles.emptyText}>{i18n.t('noPlayersFound') || 'No players found.'}</Text>
@@ -307,7 +344,18 @@ export default function AgentPlayersScreen() {
                     <Text style={styles.modalValue}>{getCityLabel(selectedPlayer.city || '-')}</Text>
                   </View>
                 </View>
-                <TouchableOpacity style={styles.modalButton} onPress={() => { setShowProfile(false); router.push({ pathname: '/player-view-details', params: { id: selectedPlayer.id } }); }}>
+                <TouchableOpacity style={styles.modalButton} onPress={() => { 
+                  setShowProfile(false); 
+                  const playerName = `${selectedPlayer.firstName || ''} ${selectedPlayer.lastName || ''}`.trim() || 'Player';
+                  router.push({ 
+                    pathname: '/agent-user-posts', 
+                    params: { 
+                      ownerId: selectedPlayer.id,
+                      ownerRole: 'player',
+                      userName: playerName
+                    } 
+                  }); 
+                }}>
                   <Text style={styles.modalButtonText}>{i18n.t('viewProfile') || 'View Profile'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -492,6 +540,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+  },
+  playerPhoto: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 12,
+    backgroundColor: '#f0f0f0',
   },
   playerInfo: {
     flex: 1,

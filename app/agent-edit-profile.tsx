@@ -9,7 +9,7 @@ import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
 import { auth, db } from '../lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { uploadImageToStorage } from '../lib/firebaseHelpers';
+import { uploadMedia } from '../services/MediaService';
 
 const cities = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>).map(([key, label]) => ({ key, label }));
 
@@ -25,6 +25,7 @@ export default function AgentEditProfileScreen() {
   const [city, setCity] = useState('');
   const [cityModal, setCityModal] = useState(false);
   const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -61,7 +62,10 @@ export default function AgentEditProfileScreen() {
         setAgency(data.agency || '');
         setLicense(data.license || '');
         setCity(data.city || '');
-        setProfilePhoto(data.profilePhoto || null);
+        if (data.profilePhoto) {
+          setProfilePhoto(data.profilePhoto);
+          setProfilePhotoUrl(data.profilePhoto);
+        }
       } else {
         // Fallback to 'users' collection
         const userDocRef = doc(db, 'users', user.uid);
@@ -75,7 +79,10 @@ export default function AgentEditProfileScreen() {
           setAgency(data.agency || '');
           setLicense(data.license || '');
           setCity(data.city || '');
-          setProfilePhoto(data.profilePhoto || null);
+          if (data.profilePhoto) {
+            setProfilePhoto(data.profilePhoto);
+            setProfilePhotoUrl(data.profilePhoto);
+          }
         }
       }
     } catch (error) {
@@ -98,8 +105,9 @@ export default function AgentEditProfileScreen() {
   };
 
   const handleSave = async () => {
-    if (!firstName || !lastName || !phone || !city) {
-      Alert.alert(i18n.t('missingFields'), i18n.t('fillAllRequiredFields'));
+    // Only require phone number - other fields are optional
+    if (!phone || !phone.trim()) {
+      Alert.alert(i18n.t('error'), i18n.t('phoneRequired') || 'Phone number is required');
       return;
     }
 
@@ -111,27 +119,36 @@ export default function AgentEditProfileScreen() {
         return;
       }
 
-      let profilePhotoUrl = profilePhoto;
+      let finalProfilePhotoUrl = profilePhotoUrl;
 
-      // If the photo is a local URI (not a URL), upload it to Firebase Storage
-      if (profilePhoto && !profilePhoto.startsWith('http')) {
-        profilePhotoUrl = await uploadImageToStorage(
-          profilePhoto,
-          `users/${user.uid}/profile.jpg`
-        );
+      // Upload profile photo if it's a new local image
+      if (profilePhoto && profilePhoto !== profilePhotoUrl && 
+          (profilePhoto.startsWith('file://') || profilePhoto.startsWith('content://'))) {
+        try {
+          const cloudinaryResponse = await uploadMedia(profilePhoto, 'image');
+          finalProfilePhotoUrl = cloudinaryResponse.secure_url;
+          setProfilePhotoUrl(finalProfilePhotoUrl);
+        } catch (error) {
+          console.error('Error uploading profile photo:', error);
+          Alert.alert(i18n.t('error'), 'Failed to upload profile photo');
+          setSaving(false);
+          return;
+        }
       }
 
-      const updateData = {
-        firstName,
-        lastName,
-        email,
-        phone,
-        agency,
-        license,
-        city,
-        profilePhoto: profilePhotoUrl,
+      const updateData: any = {
+        phone: phone.trim(),
         updatedAt: new Date().toISOString(),
       };
+
+      // Only include optional fields if they have values
+      if (firstName && firstName.trim()) updateData.firstName = firstName.trim();
+      if (lastName && lastName.trim()) updateData.lastName = lastName.trim();
+      if (email && email.trim()) updateData.email = email.trim();
+      if (agency && agency.trim()) updateData.agency = agency.trim();
+      if (license && license.trim()) updateData.license = license.trim();
+      if (city && city.trim()) updateData.city = city.trim();
+      if (finalProfilePhotoUrl) updateData.profilePhoto = finalProfilePhotoUrl;
 
       // Update both collections
       await updateDoc(doc(db, 'agents', user.uid), updateData);
