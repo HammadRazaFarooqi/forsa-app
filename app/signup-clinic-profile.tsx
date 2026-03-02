@@ -52,6 +52,7 @@ interface Errors {
   phone?: string;
   services?: string;
   workingHours?: string;
+  doctors?: string;
 }
 
 const SignupClinic = () => {
@@ -180,6 +181,18 @@ const SignupClinic = () => {
     if (activeDays.length === 0) {
       newErrors.workingHours = i18n.t('workingHoursRequired') || 'At least one day with working hours is required';
       newMissing.workingHours = true;
+    }
+
+    // At least one doctor required, each with name filled
+    if (!doctors.length) {
+      newErrors.doctors = i18n.t('atLeastOneDoctorRequired') || 'At least one doctor is required';
+      newMissing.doctors = true;
+    } else {
+      const invalidDoctor = doctors.findIndex(d => !d.name || !d.name.trim());
+      if (invalidDoctor >= 0) {
+        newErrors.doctors = i18n.t('doctorNameRequired') || 'Doctor name is required for all doctors';
+        newMissing.doctors = true;
+      }
     }
 
     setErrors(newErrors);
@@ -603,7 +616,7 @@ const SignupClinic = () => {
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>
-                  {i18n.t('doctors')} <Text style={{ color: '#888', fontSize: 13 }}>({i18n.t('optional') || 'optional'})</Text>
+                  {i18n.t('doctors')} <Text style={{ color: '#e00', fontSize: 13 }}>*</Text>
                 </Text>
                 <View style={{ width: '100%', marginBottom: 16 }}>
                   {doctors.length > 0 && (
@@ -624,7 +637,7 @@ const SignupClinic = () => {
                         />
                         <TextInput
                           style={{ flex: 2, borderWidth: 1, borderColor: '#ccc', borderRadius: 6, padding: 8, fontSize: 15, marginRight: 8, backgroundColor: '#fff' }}
-                          placeholder={i18n.t('doctor_major') || 'Major (optional)'}
+                          placeholder={i18n.t('doctor_major') || 'Speciality'}
                           value={doc.major || ''}
                           onChangeText={v => setDoctors(prev => prev.map((d, i) => i === idx ? { ...d, major: v } : d))}
                         />
@@ -679,6 +692,7 @@ const SignupClinic = () => {
                     <Text style={{ color: '#111', fontWeight: 'bold', fontSize: 15 }}>+ {i18n.t('add_doctor') || 'Add Doctor'}</Text>
                   </TouchableOpacity>
                 </View>
+                {errors.doctors && <Text style={styles.errorText}>{errors.doctors}</Text>}
               </View>
 
               <TouchableOpacity

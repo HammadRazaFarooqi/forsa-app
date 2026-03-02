@@ -225,12 +225,22 @@ export default function PlayerBookingsScreen() {
                           <Text style={styles.bookingDetailText}>{booking.doctor}</Text>
                         </View>
                       )}
-                      {booking.service && (
-                        <View style={styles.bookingDetail}>
-                          <Ionicons name="medical-outline" size={16} color="rgba(255,255,255,0.7)" />
-                          <Text style={styles.bookingDetailText}>{booking.service}</Text>
-                        </View>
-                      )}
+                      <View style={styles.bookingDetail}>
+                        <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.7)" />
+                        <Text style={styles.bookingDetailText}>{i18n.t('day') || 'Day'}: {booking.day || '—'}</Text>
+                      </View>
+                      <View style={styles.bookingDetail}>
+                        <Ionicons name="time" size={16} color="rgba(255,255,255,0.7)" />
+                        <Text style={styles.bookingDetailText}>{i18n.t('time') || 'Time'}: {booking.time || '—'}</Text>
+                      </View>
+                      <View style={styles.bookingDetail}>
+                        <Ionicons name="medical-outline" size={16} color="rgba(255,255,255,0.7)" />
+                        <Text style={styles.bookingDetailText}>{i18n.t('service') || 'Service'}: {booking.service || '—'}</Text>
+                      </View>
+                      <View style={styles.bookingDetail}>
+                        <Ionicons name="cash-outline" size={16} color="rgba(255,255,255,0.7)" />
+                        <Text style={styles.bookingDetailText}>{i18n.t('fee') || 'Fee'}: {booking.price != null ? `${booking.price} EGP` : '—'}</Text>
+                      </View>
                     </>
                   ) : (
                     <>

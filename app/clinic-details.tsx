@@ -1,7 +1,8 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, Alert, ActivityIndicator, Modal } from 'react-native';
+import { Animated, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, Alert, ActivityIndicator, Modal } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import i18n from '../locales/i18n';
 import { db, auth } from '../lib/firebase';
 import { collection, addDoc, doc, getDoc } from 'firebase/firestore';
@@ -16,6 +17,13 @@ export default function ClinicDetailsScreen() {
   const [bookingLoading, setBookingLoading] = useState(false);
   const [doctorModalVisible, setDoctorModalVisible] = useState(false);
   const [selectedService, setSelectedService] = useState<string | null>(null);
+  const [bookingDate, setBookingDate] = useState(() => new Date());
+  const [bookingTime, setBookingTime] = useState(() => {
+    const d = new Date();
+    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+  });
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   let clinic = null;
   try {
@@ -76,9 +84,8 @@ export default function ClinicDetailsScreen() {
     // If no doctors available, still allow booking
     const selectedDoctor = doctorName || (doctors.length > 0 ? doctors[0].name : 'General Consultation');
     const selectedServiceName = serviceName || (services.length > 0 ? services[0].name : 'General Service');
-    const servicePrice = serviceName
-      ? (clinic[`${serviceName}_fee`] || 0)
-      : (services.length > 0 ? services[0].fee : 0);
+    const rawFee = clinic.services?.[selectedServiceName]?.fee ?? clinic[`${selectedServiceName}_fee`] ?? (services.length > 0 ? services[0].fee : 0);
+    const servicePrice = Number(rawFee) || 0;
 
     try {
       setBookingLoading(true);
@@ -111,6 +118,10 @@ export default function ClinicDetailsScreen() {
       } catch (err) {
       }
 
+      const dateStr = bookingDate.toISOString().split('T')[0];
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const dayOfWeek = dayNames[bookingDate.getDay()];
+
       const bookingData = {
         playerId: user.uid,
         parentId: user.uid, // Add parentId for consistency with parent-bookings.tsx
@@ -120,7 +131,9 @@ export default function ClinicDetailsScreen() {
         providerName: clinicName,
         type: 'clinic',
         status: 'pending',
-        date: new Date().toISOString().split('T')[0],
+        date: dateStr,
+        day: dayOfWeek,
+        time: bookingTime,
         createdAt: new Date().toISOString(),
         name: clinicName,
         city: clinicCity,
@@ -174,16 +187,20 @@ export default function ClinicDetailsScreen() {
       </View>
     );
   }
-  // Extract all *_fee keys for services
-  const services = Object.keys(clinic)
+  // Services: support Firestore format (clinic.services) and legacy (*_fee keys)
+  const servicesFromMap =
+    clinic.services && typeof clinic.services === 'object'
+      ? Object.entries(clinic.services)
+          .filter(([, v]: [string, any]) => v && (v.selected || (v.fee != null && String(v.fee).trim() !== '')))
+          .map(([name, v]: [string, any]) => ({ name, fee: v?.fee != null ? String(v.fee) : '' }))
+      : [];
+  const servicesFromFeeKeys = Object.keys(clinic)
     .filter((key) => key.endsWith('_fee') && clinic[key])
-    .map((key) => ({
-      name: key.replace('_fee', ''),
-      fee: clinic[key],
-    }));
+    .map((key) => ({ name: key.replace('_fee', ''), fee: String(clinic[key] ?? '') }));
+  const services = servicesFromMap.length > 0 ? servicesFromMap : servicesFromFeeKeys;
 
-  // Use working_hours for timings (string or JSON)
-  const timings = clinic.working_hours;
+  // Timings: support Firestore workingHours and legacy working_hours
+  const timings = clinic.workingHours || clinic.working_hours;
   // Fallback demo doctors if not present
   // Accepts both new and old doctor formats
   const doctors = (clinic.doctors || [
@@ -200,12 +217,12 @@ export default function ClinicDetailsScreen() {
     <View style={styles.container}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 40 }}>
         <View style={styles.headerBox}>
-          {clinic.profile_photo ? (
-            <Image source={{ uri: clinic.profile_photo }} style={styles.profilePhoto} />
+          {(clinic.profilePhoto || clinic.profile_photo) ? (
+            <Image source={{ uri: clinic.profilePhoto || clinic.profile_photo }} style={styles.profilePhoto} />
           ) : (
             <Image source={require('../assets/logo.png')} style={styles.logo} />
           )}
-          <Text style={styles.title}>{clinic.clinic_name || clinic.name}</Text>
+          <Text style={styles.title}>{clinic.clinicName || clinic.clinic_name || clinic.name}</Text>
           <TouchableOpacity
             style={styles.favoriteBtn}
             onPress={() => toggleFavorite(clinic.id)}
@@ -218,11 +235,11 @@ export default function ClinicDetailsScreen() {
         </View>
         <View style={styles.sectionBox}>
           <Text style={styles.sectionTitle}>{i18n.t('address') || 'Address'}</Text>
-          <Text style={styles.sectionText}>{clinic.address}</Text>
+          <Text style={styles.sectionText}>{clinic.address || '—'}</Text>
         </View>
         <View style={styles.sectionBox}>
           <Text style={styles.sectionTitle}>{i18n.t('description') || 'Description'}</Text>
-          <Text style={styles.sectionText}>{clinic.description}</Text>
+          <Text style={styles.sectionText}>{clinic.description || '—'}</Text>
         </View>
         {/* Working Hours Table */}
         <View style={styles.sectionBox}>
@@ -297,7 +314,7 @@ export default function ClinicDetailsScreen() {
           {services.length > 0 ? services.map((s, idx) => (
             <View key={idx} style={styles.feeRow}>
               <Text style={[styles.feeType, { flex: 1 }]}>{i18n.t(s.name) !== s.name ? i18n.t(s.name) : s.name}</Text>
-              <Text style={[styles.feeValue, { flex: 1 }]}>{String(s.fee)} EGP</Text>
+              <Text style={[styles.feeValue, { flex: 1 }]}>{s.fee != null && String(s.fee).trim() !== '' ? `${String(s.fee)} EGP` : '—'}</Text>
             </View>
           )) : <Text style={styles.sectionText}>{i18n.t('noServices') || 'No services listed.'}</Text>}
         </View>
@@ -306,6 +323,90 @@ export default function ClinicDetailsScreen() {
           <Text style={styles.sectionTitle}>{i18n.t('contact') || 'Contact'}</Text>
           <Text style={styles.sectionText}>{clinic.phone}</Text>
         </View>
+
+        {/* Date & Time selection for booking */}
+        <View style={styles.sectionBox}>
+          <Text style={styles.sectionTitle}>{i18n.t('preferredDateTime') || 'Preferred date & time'}</Text>
+          <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
+            <TouchableOpacity
+              style={styles.dateTimeChip}
+              onPress={() => setShowDatePicker(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="calendar-outline" size={18} color="#000" />
+              <Text style={styles.dateTimeChipText}>
+                {bookingDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.dateTimeChip}
+              onPress={() => setShowTimePicker(true)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="time-outline" size={18} color="#000" />
+              <Text style={styles.dateTimeChipText}>{bookingTime}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {showDatePicker && (
+          <Modal visible transparent animationType="fade">
+            <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setShowDatePicker(false)}>
+              <View style={styles.pickerCard} onStartShouldSetResponder={() => true}>
+                <Text style={styles.pickerTitle}>{i18n.t('selectDate') || 'Select date'}</Text>
+                <DateTimePicker
+                  value={bookingDate}
+                  mode="date"
+                  minimumDate={new Date()}
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  textColor="#000"
+                  onChange={(_, d) => {
+                    if (d) setBookingDate(d);
+                    if (Platform.OS === 'android') setShowDatePicker(false);
+                  }}
+                />
+                {Platform.OS === 'ios' && (
+                  <TouchableOpacity style={styles.pickerDone} onPress={() => setShowDatePicker(false)}>
+                    <Text style={styles.pickerDoneText}>{i18n.t('ok') || 'OK'}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </TouchableOpacity>
+          </Modal>
+        )}
+        {showTimePicker && (
+          <Modal visible transparent animationType="fade">
+            <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setShowTimePicker(false)}>
+              <View style={styles.pickerCard} onStartShouldSetResponder={() => true}>
+                <Text style={styles.pickerTitle}>{i18n.t('selectTime') || 'Select time'}</Text>
+                <DateTimePicker
+                  value={(() => {
+                    const [h, m] = bookingTime.split(':').map(Number);
+                    const d = new Date(bookingDate);
+                    d.setHours(h, m || 0, 0, 0);
+                    return d;
+                  })()}
+                  mode="time"
+                  is24Hour={true}
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  textColor="#000"
+                  onChange={(_, d) => {
+                    if (d) {
+                      const str = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+                      setBookingTime(str);
+                    }
+                    if (Platform.OS === 'android') setShowTimePicker(false);
+                  }}
+                />
+                {Platform.OS === 'ios' && (
+                  <TouchableOpacity style={styles.pickerDone} onPress={() => setShowTimePicker(false)}>
+                    <Text style={styles.pickerDoneText}>{i18n.t('ok') || 'OK'}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </TouchableOpacity>
+          </Modal>
+        )}
 
         <TouchableOpacity
           style={[styles.reserveBtn, bookingLoading && styles.reserveBtnDisabled]}
@@ -459,6 +560,52 @@ const styles = StyleSheet.create({
   feeValue: {
     color: '#000',
     fontWeight: 'bold',
+    fontSize: 16,
+  },
+  dateTimeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    gap: 8,
+  },
+  dateTimeChipText: {
+    fontSize: 15,
+    color: '#111',
+    fontWeight: '500',
+  },
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  pickerCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    minWidth: 280,
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    textAlign: 'center',
+    color: '#000',
+  },
+  pickerDone: {
+    marginTop: 16,
+    paddingVertical: 12,
+    backgroundColor: '#000',
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  pickerDoneText: {
+    color: '#fff',
+    fontWeight: '600',
     fontSize: 16,
   },
   reserveBtn: {

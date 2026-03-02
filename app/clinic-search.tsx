@@ -684,18 +684,27 @@ const fetchClinics = async () => {
                
                 <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 17, marginBottom: 8 }}>{i18n.t('serviceFees') || 'Service Fees:'}</Text>
                 <View style={{ width: '100%', marginBottom: 16 }}>
-                  {Object.keys(selectedClinic).map((key) => {
-                    if (key.endsWith('_fee') && selectedClinic[key]) {
-                      const service = key.replace('_fee', '');
-                      return (
-                        <View key={key} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                          <Text style={{ color: '#fff', fontSize: 16 }}>{i18n.t(service) || service}</Text>
-                          <Text style={{ color: '#fff', fontSize: 16 }}>{selectedClinic[key]} EGP</Text>
-                        </View>
-                      );
-                    }
-                    return null;
-                  })}
+                  {selectedClinic.services && typeof selectedClinic.services === 'object'
+                    ? Object.entries(selectedClinic.services)
+                        .filter(([, v]: [string, any]) => v && (v.selected || (v.fee != null && String(v.fee).trim() !== '')))
+                        .map(([name, v]: [string, any]) => (
+                          <View key={name} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <Text style={{ color: '#fff', fontSize: 16 }}>{i18n.t(name) !== name ? i18n.t(name) : name}</Text>
+                            <Text style={{ color: '#fff', fontSize: 16 }}>{v?.fee != null ? `${v.fee} EGP` : '—'}</Text>
+                          </View>
+                        ))
+                    : Object.keys(selectedClinic).map((key) => {
+                        if (key.endsWith('_fee') && selectedClinic[key]) {
+                          const service = key.replace('_fee', '');
+                          return (
+                            <View key={key} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                              <Text style={{ color: '#fff', fontSize: 16 }}>{i18n.t(service) || service}</Text>
+                              <Text style={{ color: '#fff', fontSize: 16 }}>{selectedClinic[key]} EGP</Text>
+                            </View>
+                          );
+                        }
+                        return null;
+                      })}
                 </View>
                 <TouchableOpacity style={styles.reserveBtn} onPress={() => {
                   setModalVisible(false);
