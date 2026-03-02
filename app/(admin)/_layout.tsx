@@ -32,6 +32,8 @@ export default function AdminLayout() {
             <Stack.Screen name="notifications" options={{ title: 'Notifications' }} />
             <Stack.Screen name="qr-display" options={{ title: 'QR Code' }} />
             <Stack.Screen name="reports" options={{ title: 'Reports & Moderation' }} />
+            <Stack.Screen name="upload-media" options={{ title: 'Upload Media' }} />
+            <Stack.Screen name="my-media" options={{ title: 'My Media' }} />
         </Stack>
     );
 }

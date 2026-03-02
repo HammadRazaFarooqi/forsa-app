@@ -18,6 +18,30 @@ export default function AcademyFeedScreen() {
   const [fullScreenMedia, setFullScreenMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
   const { openMenu } = useHamburgerMenu();
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [academyPosts, setAcademyPosts] = useState<any[]>([]);
+  const [adminPosts, setAdminPosts] = useState<any[]>([]);
+
+  // Merge academy posts and admin posts (deduplicate by post ID)
+  React.useEffect(() => {
+    const active = (p: any) => !p.status || p.status === 'active';
+    const getTs = (p: any) => p.timestamp?.seconds ?? p.createdAt?.seconds ?? 0;
+    
+    // Combine both arrays and deduplicate by post ID
+    const allPosts = [...academyPosts.filter(active), ...adminPosts.filter(active)];
+    const uniquePostsMap = new Map<string, any>();
+    
+    // Use Map to ensure unique posts by ID (later posts override earlier ones)
+    allPosts.forEach(post => {
+      if (post.id) {
+        uniquePostsMap.set(post.id, post);
+      }
+    });
+    
+    // Convert back to array and sort by timestamp
+    const merged = Array.from(uniquePostsMap.values())
+      .sort((a, b) => getTs(b) - getTs(a));
+    setFeed(merged);
+  }, [academyPosts, adminPosts]);
 
   React.useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -42,21 +66,30 @@ export default function AcademyFeedScreen() {
     const db = getFirestore();
     const postsRef = collection(db, 'posts');
     
-    // Academy feed: Show posts where visibleToRoles array-contains "academy" AND status == "active"
+    // Academy feed: Show posts where visibleToRoles array-contains "academy" OR ownerRole == "admin" AND status == "active"
+    // Note: Firestore doesn't support OR in a single query, so we'll query admin posts separately and merge
     const q = query(
       postsRef,
       where('visibleToRoles', 'array-contains', 'academy'),
       where('status', '==', 'active'),
       orderBy('timestamp', 'desc')
     );
+    
+    // Admin posts query (visible to all users)
+    // Query only by ownerRole to avoid composite index requirement
+    // Filter by status and sort client-side
+    const qAdmin = query(
+      postsRef,
+      where('ownerRole', '==', 'admin')
+    );
 
-    // Set up real-time listener
+    // Set up real-time listeners for both queries
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
         // Check authentication before processing
         if (!auth.currentUser) {
-          setFeed([]);
+          setAcademyPosts([]);
           setLoading(false);
           return;
         }
@@ -66,8 +99,7 @@ export default function AcademyFeedScreen() {
           ...doc.data(),
           type: doc.data().ownerRole || 'unknown'
         }));
-        setFeed(posts);
-        setLoading(false);
+        setAcademyPosts(posts);
       },
       (error) => {
         // Check if user is still authenticated before attempting fallback
@@ -80,7 +112,7 @@ export default function AcademyFeedScreen() {
         // Check if error is due to permissions (user logged out)
         if (error.code === 'permission-denied' || error.message?.includes('permission')) {
           // Silently handle permission errors (user likely logged out)
-          setFeed([]);
+          setAcademyPosts([]);
           setLoading(false);
           return;
         }
@@ -100,7 +132,7 @@ export default function AcademyFeedScreen() {
             // Check authentication again before processing
             if (!auth.currentUser) {
               if (fallbackUnsubscribe) fallbackUnsubscribe();
-              setFeed([]);
+              setAcademyPosts([]);
               setLoading(false);
               return;
             }
@@ -112,28 +144,70 @@ export default function AcademyFeedScreen() {
                 type: doc.data().ownerRole || 'unknown'
               }))
               .filter((post: any) => !post.status || post.status === 'active');
-            setFeed(posts);
-            setLoading(false);
+            setAcademyPosts(posts);
           },
           (fallbackError) => {
             // Check if error is due to permissions
             if (fallbackError.code === 'permission-denied' || fallbackError.message?.includes('permission')) {
               // Silently handle permission errors
-              setFeed([]);
-              setLoading(false);
+              if (fallbackUnsubscribe) fallbackUnsubscribe();
+              setAcademyPosts([]);
               return;
             }
             console.error('Academy feed fallback error:', fallbackError);
-            setFeed([]);
-            setLoading(false);
+            setAcademyPosts([]);
           }
         );
       }
     );
 
-    // Cleanup listener on unmount
+    // Set up listener for admin posts
+    const unsubscribeAdmin = onSnapshot(
+      qAdmin,
+      (querySnapshot) => {
+        if (!auth.currentUser) {
+          setAdminPosts([]);
+          return;
+        }
+        
+        // Filter by status and sort client-side to avoid composite index
+        const posts = querySnapshot.docs
+          .map(doc => ({ 
+            id: doc.id, 
+            ...doc.data(),
+            type: doc.data().ownerRole || 'unknown'
+          }))
+          .filter((post: any) => !post.status || post.status === 'active')
+          .sort((a: any, b: any) => {
+            const getTs = (p: any) => p.timestamp?.seconds ?? p.createdAt?.seconds ?? 0;
+            return getTs(b) - getTs(a);
+          });
+        setAdminPosts(posts);
+      },
+      async (error) => {
+        if (!auth.currentUser) {
+          setAdminPosts([]);
+          return;
+        }
+        
+        if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+          setAdminPosts([]);
+          return;
+        }
+        
+        console.error('Academy feed (admin) error:', error?.message);
+        setAdminPosts([]);
+      }
+    );
+
+    // Stop loading after both queries have run
+    const t = setTimeout(() => setLoading(false), 800);
+
+    // Cleanup listeners on unmount
     return () => {
       unsubscribe();
+      unsubscribeAdmin();
+      clearTimeout(t);
     };
   }, []);
 
@@ -154,8 +228,12 @@ export default function AcademyFeedScreen() {
               color={item.type === 'agent' ? '#007AFF' : item.type === 'player' ? '#bfa100' : '#000'} 
               style={styles.feedIcon}
             />
-            <View>
-              <Text style={[styles.feedAuthor, item.type === 'agent' && styles.feedAuthorAgent, item.type === 'player' && styles.feedAuthorPlayer]}>
+            <View style={styles.feedAuthorTextContainer}>
+              <Text 
+                style={[styles.feedAuthor, item.type === 'agent' && styles.feedAuthorAgent, item.type === 'player' && styles.feedAuthorPlayer]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
                 {item.author || 'Unknown'}
               </Text>
               <Text style={styles.feedType}>
@@ -362,13 +440,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
   },
   feedAuthorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    marginRight: 8,
   },
   feedIcon: {
     marginRight: 12,
+  },
+  feedAuthorTextContainer: {
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   feedAuthor: {
     fontWeight: 'bold',

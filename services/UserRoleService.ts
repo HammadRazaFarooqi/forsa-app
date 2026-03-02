@@ -76,7 +76,7 @@ export function getVisibleToRoles(ownerRole: Role): Role[] {
     case 'parent':
       return ['parent'];
     case 'admin':
-      // Admins can see everything, but for posts visibility, treat as player
+      // Admin posts are visible to ALL roles
       return ['player', 'agent', 'academy', 'clinic', 'parent'];
     default:
       // Default to player visibility

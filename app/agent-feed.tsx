@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { collection, onSnapshot, getFirestore, orderBy, query, where, doc, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, getFirestore, orderBy, query, where, doc, getDoc, getDocs } from 'firebase/firestore';
 import React, { useRef, useState, useEffect } from 'react';
 import { ActivityIndicator, Animated, Easing, FlatList, Image, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
@@ -78,6 +78,49 @@ export default function AgentFeedScreen() {
   const [userNames, setUserNames] = React.useState<{ [key: string]: string }>({});
   const [fullScreenMedia, setFullScreenMedia] = React.useState<{ uri: string; type: 'image' | 'video' } | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [agentPosts, setAgentPosts] = React.useState<any[]>([]);
+  const [adminPosts, setAdminPosts] = React.useState<any[]>([]);
+
+  // Merge agent posts and admin posts (deduplicate by post ID)
+  React.useEffect(() => {
+    const active = (p: any) => !p.status || p.status === 'active';
+    const getTs = (p: any) => p.timestamp?.seconds ?? p.createdAt?.seconds ?? 0;
+    
+    // Combine both arrays and deduplicate by post ID
+    const allPosts = [...agentPosts.filter(active), ...adminPosts.filter(active)];
+    const uniquePostsMap = new Map<string, any>();
+    
+    // Use Map to ensure unique posts by ID (later posts override earlier ones)
+    allPosts.forEach(post => {
+      if (post.id) {
+        uniquePostsMap.set(post.id, post);
+      }
+    });
+    
+    // Convert back to array and sort by timestamp
+    const merged = Array.from(uniquePostsMap.values())
+      .sort((a, b) => getTs(b) - getTs(a));
+    setFeed(merged);
+    
+    // Fetch user names for merged posts
+    const namePromises = merged.map(async (post: any) => {
+      if (post.ownerId && post.ownerRole) {
+        const name = await getUserName(post.ownerId, post.ownerRole);
+        return { key: post.ownerId, name };
+      }
+      return null;
+    });
+    
+    Promise.all(namePromises).then(nameResults => {
+      const namesMap: { [key: string]: string } = {};
+      nameResults.forEach(result => {
+        if (result) {
+          namesMap[result.key] = result.name;
+        }
+      });
+      setUserNames(namesMap);
+    });
+  }, [agentPosts, adminPosts]);
 
   React.useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -110,34 +153,28 @@ export default function AgentFeedScreen() {
       orderBy('timestamp', 'desc')
     );
 
-    // Set up real-time listener
+    // Admin posts query (visible to all users)
+    // Query only by ownerRole to avoid composite index requirement
+    // Filter by status and sort client-side
+    const qAdmin = query(
+      postsRef,
+      where('ownerRole', '==', 'admin')
+    );
+
+    // Set up real-time listener for agent posts
     const unsubscribe = onSnapshot(
       q,
-      async (querySnapshot) => {
+      (querySnapshot) => {
+        if (!auth.currentUser) {
+          setAgentPosts([]);
+          return;
+        }
+        
         const posts = querySnapshot.docs.map(doc => ({ 
           id: doc.id, 
           ...doc.data() 
         }));
-        setFeed(posts);
-        
-        // Fetch user names for all posts
-        const namePromises = posts.map(async (post: any) => {
-          if (post.ownerId && post.ownerRole) {
-            const name = await getUserName(post.ownerId, post.ownerRole);
-            return { key: post.ownerId, name };
-          }
-          return null;
-        });
-        
-        const nameResults = await Promise.all(namePromises);
-        const namesMap: { [key: string]: string } = {};
-        nameResults.forEach(result => {
-          if (result) {
-            namesMap[result.key] = result.name;
-          }
-        });
-        setUserNames(namesMap);
-        setLoading(false);
+        setAgentPosts(posts);
       },
       (error) => {
         // Check if user is still authenticated before attempting fallback
@@ -220,9 +257,52 @@ export default function AgentFeedScreen() {
       }
     );
 
-    // Cleanup listener on unmount
+    // Set up listener for admin posts
+    const unsubscribeAdmin = onSnapshot(
+      qAdmin,
+      (querySnapshot) => {
+        if (!auth.currentUser) {
+          setAdminPosts([]);
+          return;
+        }
+        
+        // Filter by status and sort client-side to avoid composite index
+        const posts = querySnapshot.docs
+          .map(doc => ({ 
+            id: doc.id, 
+            ...doc.data() 
+          }))
+          .filter((post: any) => !post.status || post.status === 'active')
+          .sort((a: any, b: any) => {
+            const getTs = (p: any) => p.timestamp?.seconds ?? p.createdAt?.seconds ?? 0;
+            return getTs(b) - getTs(a);
+          });
+        setAdminPosts(posts);
+      },
+      async (error) => {
+        if (!auth.currentUser) {
+          setAdminPosts([]);
+          return;
+        }
+        
+        if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+          setAdminPosts([]);
+          return;
+        }
+        
+        console.error('Agent feed (admin) error:', error?.message);
+        setAdminPosts([]);
+      }
+    );
+
+    // Stop loading after both queries have run
+    const t = setTimeout(() => setLoading(false), 800);
+
+    // Cleanup listeners on unmount
     return () => {
       unsubscribe();
+      unsubscribeAdmin();
+      clearTimeout(t);
     };
   }, []);
 
@@ -285,7 +365,13 @@ export default function AgentFeedScreen() {
                         activeOpacity={0.7}
                       >
                         <Ionicons name="person-circle-outline" size={24} color="#000" />
-                        <Text style={styles.feedAuthor}>{displayName}</Text>
+                        <Text 
+                          style={styles.feedAuthor}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {displayName}
+                        </Text>
                       </TouchableOpacity>
                       <View style={styles.feedHeaderRight}>
                         {timestamp && (
@@ -462,17 +548,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
   },
   feedAuthorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    marginRight: 8,
   },
   feedAuthor: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#000',
+    flexShrink: 1,
   },
   feedContent: {
     fontSize: 15,

@@ -42,8 +42,12 @@ export default function CreatePostScreen() {
         const userDoc = await getDoc(doc(getFirestore(), 'users', user.uid));
         if (userDoc.exists()) {
           const d = userDoc.data();
-          author = d?.academyName || d?.agentName || d?.clinicName || d?.parentName || d?.name ||
-            (d?.firstName && d?.lastName ? `${d.firstName} ${d.lastName}`.trim() : author);
+          if (ownerRole === 'admin') {
+            author = d?.name || d?.adminName || 'Admin';
+          } else {
+            author = d?.academyName || d?.agentName || d?.clinicName || d?.parentName || d?.name ||
+              (d?.firstName && d?.lastName ? `${d.firstName} ${d.lastName}`.trim() : author);
+          }
         }
       } catch {
         // use default author

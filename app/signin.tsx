@@ -189,7 +189,7 @@ const SignInScreen = () => {
             router.replace("/agent-feed");
             break;
           case "academy":
-            router.replace("/academy-home");
+            router.replace("/academy-feed");
             break;
           case "parent":
             router.replace("/parent-feed");

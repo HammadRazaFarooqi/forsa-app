@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import { auth, db } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, setDoc, query, where, orderBy, onSnapshot, Unsubscribe, getDoc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, setDoc, query, where, orderBy, onSnapshot, Unsubscribe, getDoc, deleteDoc, updateDoc, getDocs } from 'firebase/firestore';
 import { getCurrentUserRole, getVisibleToRoles, type Role } from './UserRoleService';
 
 // Helper function to get environment variables with multiple fallbacks
@@ -249,6 +249,26 @@ export async function saveMediaToFirestore(
 }
 
 /**
+ * Helper function to get author name based on user role
+ */
+async function getAuthorName(ownerId: string, ownerRole: Role): Promise<string> {
+  try {
+    const userDoc = await getDoc(doc(db, 'users', ownerId));
+    if (userDoc.exists()) {
+      const d = userDoc.data();
+      if (ownerRole === 'admin') {
+        return d?.name || d?.adminName || 'Admin';
+      }
+      return d?.academyName || d?.agentName || d?.clinicName || d?.parentName || d?.name ||
+        (d?.firstName && d?.lastName ? `${d.firstName} ${d.lastName}`.trim() : 'User');
+    }
+  } catch {
+    // use default
+  }
+  return ownerRole === 'admin' ? 'Admin' : 'User';
+}
+
+/**
  * Create a feed item in /posts collection if feed uses posts
  * This links the media to the existing feed structure
  * @param mediaDoc - The media document data
@@ -283,7 +303,7 @@ export async function createFeedItemIfNeeded(
       visibilityScope: 'role_based',
       status: 'active',
       visibility: mediaDoc.visibility || 'public',
-      author: 'User', // Can be enhanced to fetch user name
+      author: await getAuthorName(mediaDoc.ownerId, ownerRole), // Fetch user name based on role
       content: content || '', // Caption/text content for the post
       timestamp: serverTimestamp(),
       createdAt: serverTimestamp(),
@@ -569,5 +589,118 @@ export async function validateFileSizeBeforeUpload(
     // (backend will also validate)
     console.warn('[MediaService] File size validation warning:', error.message);
     return true;
+  }
+}
+
+/**
+ * Update media caption/content for admin's uploaded media
+ * Updates the associated post's content field
+ * @param mediaId - Media document ID
+ * @param postId - Post document ID (optional, will be looked up if not provided)
+ * @param newContent - New caption/content text
+ */
+export async function updateMediaCaption(
+  mediaId: string,
+  postId: string | null,
+  newContent: string
+): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('User must be authenticated to update media');
+  }
+
+  try {
+    let targetPostId = postId;
+
+    // If postId not provided, find the associated post
+    if (!targetPostId) {
+      const postsRef = collection(db, 'posts');
+      const postQuery = query(
+        postsRef,
+        where('mediaId', '==', mediaId),
+        where('ownerId', '==', user.uid)
+      );
+      const postSnap = await getDocs(postQuery);
+      const postDoc = postSnap.docs[0];
+      
+      if (!postDoc) {
+        throw new Error('Associated post not found');
+      }
+      
+      targetPostId = postDoc.id;
+    }
+
+    // Update the post's content field
+    const postRef = doc(db, 'posts', targetPostId);
+    await updateDoc(postRef, {
+      content: newContent,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error: any) {
+    console.error('Error updating media caption:', error);
+    throw new Error(`Failed to update caption: ${error.message}`);
+  }
+}
+
+/**
+ * Delete admin's uploaded media and associated post
+ * @param mediaId - Media document ID
+ * @param postId - Post document ID (optional, will be looked up if not provided)
+ */
+export async function deleteAdminMedia(
+  mediaId: string,
+  postId: string | null
+): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error('User must be authenticated to delete media');
+  }
+
+  try {
+    // Verify ownership
+    const mediaRef = doc(db, 'media', mediaId);
+    const mediaSnap = await getDoc(mediaRef);
+    
+    if (!mediaSnap.exists()) {
+      throw new Error('Media not found');
+    }
+
+    const mediaData = mediaSnap.data();
+    if (mediaData.ownerId !== user.uid) {
+      throw new Error('You can only delete your own media');
+    }
+
+    let targetPostId = postId;
+
+    // If postId not provided, find the associated post
+    if (!targetPostId) {
+      const postsRef = collection(db, 'posts');
+      const postQuery = query(
+        postsRef,
+        where('mediaId', '==', mediaId),
+        where('ownerId', '==', user.uid)
+      );
+      const postSnap = await getDocs(postQuery);
+      const postDoc = postSnap.docs[0];
+      
+      if (postDoc) {
+        targetPostId = postDoc.id;
+      }
+    }
+
+    // Delete associated post if it exists
+    if (targetPostId) {
+      const postRef = doc(db, 'posts', targetPostId);
+      await deleteDoc(postRef);
+    }
+
+    // Delete media document
+    await deleteDoc(mediaRef);
+
+    // Note: Cloudinary cleanup would ideally be done here, but it requires backend API
+    // For now, we only delete from Firestore. Cloudinary cleanup can be done via backend cron job.
+  } catch (error: any) {
+    console.error('Error deleting admin media:', error);
+    throw new Error(`Failed to delete media: ${error.message}`);
   }
 }

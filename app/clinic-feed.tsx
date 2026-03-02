@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { collection, onSnapshot, getFirestore, orderBy, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, getFirestore, orderBy, query, where, getDocs } from 'firebase/firestore';
 import React, { useState, useRef } from 'react';
 import { ActivityIndicator, Animated, Easing, FlatList, Image, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
@@ -18,6 +18,30 @@ const ClinicFeedScreen = () => {
   const [loading, setLoading] = useState(true);
   const [fullScreenMedia, setFullScreenMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const [clinicPosts, setClinicPosts] = useState<any[]>([]);
+  const [adminPosts, setAdminPosts] = useState<any[]>([]);
+
+  // Merge clinic posts and admin posts (deduplicate by post ID)
+  React.useEffect(() => {
+    const active = (p: any) => !p.status || p.status === 'active';
+    const getTs = (p: any) => p.timestamp?.seconds ?? p.createdAt?.seconds ?? 0;
+    
+    // Combine both arrays and deduplicate by post ID
+    const allPosts = [...clinicPosts.filter(active), ...adminPosts.filter(active)];
+    const uniquePostsMap = new Map<string, any>();
+    
+    // Use Map to ensure unique posts by ID (later posts override earlier ones)
+    allPosts.forEach(post => {
+      if (post.id) {
+        uniquePostsMap.set(post.id, post);
+      }
+    });
+    
+    // Convert back to array and sort by timestamp
+    const merged = Array.from(uniquePostsMap.values())
+      .sort((a, b) => getTs(b) - getTs(a));
+    setFeed(merged);
+  }, [clinicPosts, adminPosts]);
 
   React.useEffect(() => {
     setLoading(true);
@@ -41,13 +65,21 @@ const ClinicFeedScreen = () => {
       orderBy('timestamp', 'desc')
     );
 
-    // Set up real-time listener
+    // Admin posts query (visible to all users)
+    // Query only by ownerRole to avoid composite index requirement
+    // Filter by status and sort client-side
+    const qAdmin = query(
+      postsRef,
+      where('ownerRole', '==', 'admin')
+    );
+
+    // Set up real-time listener for clinic posts
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
         // Check authentication before processing
         if (!auth.currentUser) {
-          setFeed([]);
+          setClinicPosts([]);
           setLoading(false);
           return;
         }
@@ -56,8 +88,7 @@ const ClinicFeedScreen = () => {
           id: doc.id, 
           ...doc.data() 
         }));
-        setFeed(posts);
-        setLoading(false);
+        setClinicPosts(posts);
       },
       (error) => {
         // Check if user is still authenticated before attempting fallback
@@ -98,28 +129,69 @@ const ClinicFeedScreen = () => {
             const posts = snapshot.docs
               .map(doc => ({ id: doc.id, ...doc.data() }))
               .filter((post: any) => !post.status || post.status === 'active');
-            setFeed(posts);
-            setLoading(false);
+            setClinicPosts(posts);
           },
           (fallbackError) => {
             // Check if error is due to permissions
             if (fallbackError.code === 'permission-denied' || fallbackError.message?.includes('permission')) {
               // Silently handle permission errors
-              setFeed([]);
-              setLoading(false);
+              if (fallbackUnsubscribe) fallbackUnsubscribe();
+              setClinicPosts([]);
               return;
             }
             console.error('Clinic feed fallback error:', fallbackError);
-            setFeed([]);
-            setLoading(false);
+            setClinicPosts([]);
           }
         );
       }
     );
 
-    // Cleanup listener on unmount
+    // Set up listener for admin posts
+    const unsubscribeAdmin = onSnapshot(
+      qAdmin,
+      (querySnapshot) => {
+        if (!auth.currentUser) {
+          setAdminPosts([]);
+          return;
+        }
+        
+        // Filter by status and sort client-side to avoid composite index
+        const posts = querySnapshot.docs
+          .map(doc => ({ 
+            id: doc.id, 
+            ...doc.data() 
+          }))
+          .filter((post: any) => !post.status || post.status === 'active')
+          .sort((a: any, b: any) => {
+            const getTs = (p: any) => p.timestamp?.seconds ?? p.createdAt?.seconds ?? 0;
+            return getTs(b) - getTs(a);
+          });
+        setAdminPosts(posts);
+      },
+      async (error) => {
+        if (!auth.currentUser) {
+          setAdminPosts([]);
+          return;
+        }
+        
+        if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+          setAdminPosts([]);
+          return;
+        }
+        
+        console.error('Clinic feed (admin) error:', error?.message);
+        setAdminPosts([]);
+      }
+    );
+
+    // Stop loading after both queries have run
+    const t = setTimeout(() => setLoading(false), 800);
+
+    // Cleanup listeners on unmount
     return () => {
       unsubscribe();
+      unsubscribeAdmin();
+      clearTimeout(t);
     };
   }, []);
 
@@ -339,16 +411,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
   },
   feedAuthorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    marginRight: 8,
   },
   feedAuthor: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#000',
+    flexShrink: 1,
   },
   feedContent: {
     fontSize: 15,

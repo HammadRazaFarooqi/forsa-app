@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { collection, onSnapshot, getFirestore, orderBy, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, getFirestore, orderBy, query, where, getDocs } from 'firebase/firestore';
 import React, { useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, FlatList, Image, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
@@ -16,6 +16,30 @@ export default function ParentFeedScreen() {
   const [loading, setLoading] = useState(true);
   const [fullScreenMedia, setFullScreenMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [parentPosts, setParentPosts] = useState<any[]>([]);
+  const [adminPosts, setAdminPosts] = useState<any[]>([]);
+
+  // Merge parent posts and admin posts (deduplicate by post ID)
+  React.useEffect(() => {
+    const active = (p: any) => !p.status || p.status === 'active';
+    const getTs = (p: any) => p.timestamp?.seconds ?? p.createdAt?.seconds ?? 0;
+    
+    // Combine both arrays and deduplicate by post ID
+    const allPosts = [...parentPosts.filter(active), ...adminPosts.filter(active)];
+    const uniquePostsMap = new Map<string, any>();
+    
+    // Use Map to ensure unique posts by ID (later posts override earlier ones)
+    allPosts.forEach(post => {
+      if (post.id) {
+        uniquePostsMap.set(post.id, post);
+      }
+    });
+    
+    // Convert back to array and sort by timestamp
+    const merged = Array.from(uniquePostsMap.values())
+      .sort((a, b) => getTs(b) - getTs(a));
+    setFeed(merged);
+  }, [parentPosts, adminPosts]);
 
   React.useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -48,13 +72,21 @@ export default function ParentFeedScreen() {
       orderBy('timestamp', 'desc')
     );
 
-    // Set up real-time listener
+    // Admin posts query (visible to all users)
+    // Query only by ownerRole to avoid composite index requirement
+    // Filter by status and sort client-side
+    const qAdmin = query(
+      postsRef,
+      where('ownerRole', '==', 'admin')
+    );
+
+    // Set up real-time listener for parent posts
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
         // Check authentication before processing
         if (!auth.currentUser) {
-          setFeed([]);
+          setParentPosts([]);
           setLoading(false);
           return;
         }
@@ -63,8 +95,7 @@ export default function ParentFeedScreen() {
           id: doc.id, 
           ...doc.data() 
         }));
-        setFeed(posts);
-        setLoading(false);
+        setParentPosts(posts);
       },
       (error) => {
         // Check if user is still authenticated before attempting fallback
@@ -105,24 +136,70 @@ export default function ParentFeedScreen() {
             const posts = snapshot.docs
               .map(doc => ({ id: doc.id, ...doc.data() }))
               .filter((post: any) => !post.status || post.status === 'active');
-            setFeed(posts);
-            setLoading(false);
+            setParentPosts(posts);
           },
           (fallbackError) => {
             // Check if error is due to permissions
             if (fallbackError.code === 'permission-denied' || fallbackError.message?.includes('permission')) {
               // Silently handle permission errors
-              setFeed([]);
-              setLoading(false);
+              if (fallbackUnsubscribe) fallbackUnsubscribe();
+              setParentPosts([]);
               return;
             }
             console.error('Parent feed fallback error:', fallbackError);
-            setFeed([]);
-            setLoading(false);
+            setParentPosts([]);
           }
         );
       }
     );
+
+    // Set up listener for admin posts
+    const unsubscribeAdmin = onSnapshot(
+      qAdmin,
+      (querySnapshot) => {
+        if (!auth.currentUser) {
+          setAdminPosts([]);
+          return;
+        }
+        
+        // Filter by status and sort client-side to avoid composite index
+        const posts = querySnapshot.docs
+          .map(doc => ({ 
+            id: doc.id, 
+            ...doc.data() 
+          }))
+          .filter((post: any) => !post.status || post.status === 'active')
+          .sort((a: any, b: any) => {
+            const getTs = (p: any) => p.timestamp?.seconds ?? p.createdAt?.seconds ?? 0;
+            return getTs(b) - getTs(a);
+          });
+        setAdminPosts(posts);
+      },
+      async (error) => {
+        if (!auth.currentUser) {
+          setAdminPosts([]);
+          return;
+        }
+        
+        if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+          setAdminPosts([]);
+          return;
+        }
+        
+        console.error('Parent feed (admin) error:', error?.message);
+        setAdminPosts([]);
+      }
+    );
+
+    // Stop loading after both queries have run
+    const t = setTimeout(() => setLoading(false), 800);
+
+    // Cleanup listeners on unmount
+    return () => {
+      unsubscribe();
+      unsubscribeAdmin();
+      clearTimeout(t);
+    };
 
     // Cleanup listener on unmount
     return () => {
@@ -181,7 +258,13 @@ export default function ParentFeedScreen() {
                     <Ionicons name="person-circle-outline" size={20} color="#000" />
                   </View>
                   <View style={styles.postHeaderText}>
-                    <Text style={styles.academyName}>{item.author || 'User'}</Text>
+                    <Text 
+                      style={styles.academyName}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                    >
+                      {item.author || 'User'}
+                    </Text>
                     {timestamp && (
                       <Text style={styles.postTime}>
                         {timestamp.toLocaleDateString()}

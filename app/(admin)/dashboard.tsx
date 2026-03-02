@@ -221,56 +221,82 @@ export default function AdminDashboard() {
             </View>
 
             <View style={styles.navigation}>
-                <TouchableOpacity 
-                    style={styles.navBtn} 
-                    onPress={() => router.push('/(admin)/users')}
-                    activeOpacity={0.7}
-                >
-                    <View style={styles.navIconContainer}>
-                        <Ionicons name="people" size={24} color="#fff" />
-                    </View>
-                    <Text style={styles.navText}>Users</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                    style={styles.navBtn} 
-                    onPress={() => router.push('/(admin)/bookings')}
-                    activeOpacity={0.7}
-                >
-                    <View style={styles.navIconContainer}>
-                        <Ionicons name="calendar" size={24} color="#fff" />
-                    </View>
-                    <Text style={styles.navText}>Bookings</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                    style={styles.navBtn} 
-                    onPress={() => router.push('/(admin)/checkins')}
-                    activeOpacity={0.7}
-                >
-                    <View style={styles.navIconContainer}>
-                        <Ionicons name="qr-code" size={24} color="#fff" />
-                    </View>
-                    <Text style={styles.navText}>Check-ins</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                    style={styles.navBtn} 
-                    onPress={() => router.push('/(admin)/reports')}
-                    activeOpacity={0.7}
-                >
-                    <View style={styles.navIconContainer}>
-                        <Ionicons name="flag" size={24} color="#fff" />
-                    </View>
-                    <Text style={styles.navText}>Reports</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
-                    style={styles.navBtn} 
-                    onPress={() => router.push('/(admin)/notifications')}
-                    activeOpacity={0.7}
-                >
-                    <View style={styles.navIconContainer}>
-                        <Ionicons name="notifications" size={24} color="#fff" />
-                    </View>
-                    <Text style={styles.navText}>Notifications</Text>
-                </TouchableOpacity>
+                <View style={styles.navRow}>
+                    <TouchableOpacity 
+                        style={styles.navBtn} 
+                        onPress={() => router.push('/(admin)/users')}
+                        activeOpacity={0.7}
+                    >
+                        <View style={styles.navIconContainer}>
+                            <Ionicons name="people" size={22} color="#fff" />
+                        </View>
+                        <Text style={styles.navText}>Users</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                        style={styles.navBtn} 
+                        onPress={() => router.push('/(admin)/bookings')}
+                        activeOpacity={0.7}
+                    >
+                        <View style={styles.navIconContainer}>
+                            <Ionicons name="calendar" size={22} color="#fff" />
+                        </View>
+                        <Text style={styles.navText}>Bookings</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                        style={styles.navBtn} 
+                        onPress={() => router.push('/(admin)/checkins')}
+                        activeOpacity={0.7}
+                    >
+                        <View style={styles.navIconContainer}>
+                            <Ionicons name="qr-code" size={22} color="#fff" />
+                        </View>
+                        <Text style={styles.navText}>Check-ins</Text>
+                    </TouchableOpacity>
+                </View>
+                <View style={styles.navRow}>
+                    <TouchableOpacity 
+                        style={styles.navBtn} 
+                        onPress={() => router.push('/(admin)/reports')}
+                        activeOpacity={0.7}
+                    >
+                        <View style={styles.navIconContainer}>
+                            <Ionicons name="flag" size={22} color="#fff" />
+                        </View>
+                        <Text style={styles.navText}>Reports</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                        style={styles.navBtn} 
+                        onPress={() => router.push('/(admin)/notifications')}
+                        activeOpacity={0.7}
+                    >
+                        <View style={styles.navIconContainer}>
+                            <Ionicons name="notifications" size={22} color="#fff" />
+                        </View>
+                        <Text style={styles.navText}>Notifications</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                        style={styles.navBtn} 
+                        onPress={() => router.push('/(admin)/upload-media')}
+                        activeOpacity={0.7}
+                    >
+                        <View style={styles.navIconContainer}>
+                            <Ionicons name="cloud-upload" size={22} color="#fff" />
+                        </View>
+                        <Text style={styles.navText}>Upload</Text>
+                    </TouchableOpacity>
+                </View>
+                <View style={styles.navRow}>
+                    <TouchableOpacity 
+                        style={[styles.navBtn, styles.navBtnFull]}
+                        onPress={() => router.push('/(admin)/my-media')}
+                        activeOpacity={0.7}
+                    >
+                        <View style={styles.navIconContainer}>
+                            <Ionicons name="images" size={22} color="#fff" />
+                        </View>
+                        <Text style={styles.navText}>My Media</Text>
+                    </TouchableOpacity>
+                </View>
             </View>
         </ScrollView>
     );
@@ -498,34 +524,42 @@ const styles = StyleSheet.create({
         fontSize: 14 
     },
     navigation: { 
-        flexDirection: 'row', 
-        justifyContent: 'space-between',
-        marginTop: 20,
+        marginTop: 24,
         marginBottom: 40,
-        gap: 10
+    },
+    navRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+        gap: 10,
     },
     navBtn: { 
         flex: 1,
         backgroundColor: '#2e59d9', 
-        paddingVertical: 16,
+        paddingVertical: 14,
         paddingHorizontal: 8,
         borderRadius: 12, 
         alignItems: 'center',
         justifyContent: 'center',
         shadowColor: '#2e59d9',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.3,
-        shadowRadius: 5,
-        elevation: 4,
-        minHeight: 80
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+        elevation: 3,
+        minHeight: 75,
+        maxWidth: '32%',
+    },
+    navBtnFull: {
+        maxWidth: '100%',
     },
     navIconContainer: {
-        marginBottom: 6
+        marginBottom: 6,
     },
     navText: { 
         color: '#fff', 
         fontWeight: '600', 
-        fontSize: 12,
-        textAlign: 'center'
+        fontSize: 11,
+        textAlign: 'center',
+        lineHeight: 14,
     }
 });

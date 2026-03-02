@@ -30,15 +30,29 @@ export default function PlayerFeedScreen() {
 
   const [playerPosts, setPlayerPosts] = React.useState<any[]>([]);
   const [academyPosts, setAcademyPosts] = React.useState<any[]>([]);
+  const [adminPosts, setAdminPosts] = React.useState<any[]>([]);
 
-  // Merge and sort: player's posts + all academy posts (real posts from Firestore)
+  // Merge and sort: player's posts + all academy posts + admin posts (deduplicate by post ID)
   React.useEffect(() => {
     const active = (p: any) => !p.status || p.status === 'active';
     const getTs = (p: any) => p.timestamp?.seconds ?? p.createdAt?.seconds ?? 0;
-    const merged = [...playerPosts.filter(active), ...academyPosts.filter(active)]
+    
+    // Combine all arrays and deduplicate by post ID
+    const allPosts = [...playerPosts.filter(active), ...academyPosts.filter(active), ...adminPosts.filter(active)];
+    const uniquePostsMap = new Map<string, any>();
+    
+    // Use Map to ensure unique posts by ID (later posts override earlier ones)
+    allPosts.forEach(post => {
+      if (post.id) {
+        uniquePostsMap.set(post.id, post);
+      }
+    });
+    
+    // Convert back to array and sort by timestamp
+    const merged = Array.from(uniquePostsMap.values())
       .sort((a, b) => getTs(b) - getTs(a));
     setFeed(merged);
-  }, [playerPosts, academyPosts]);
+  }, [playerPosts, academyPosts, adminPosts]);
 
   React.useEffect(() => {
     setLoading(true);
@@ -65,6 +79,14 @@ export default function PlayerFeedScreen() {
       postsRef,
       where('ownerRole', '==', 'academy'),
       orderBy('timestamp', 'desc')
+    );
+
+    // 3) Admin posts (visible to all users)
+    // Query only by ownerRole to avoid composite index requirement
+    // Filter by status and sort client-side
+    const qAdmin = query(
+      postsRef,
+      where('ownerRole', '==', 'admin')
     );
 
     const unsubPlayer = onSnapshot(
@@ -104,12 +126,32 @@ export default function PlayerFeedScreen() {
       }
     );
 
-    // Stop loading after both have run at least once (use a short delay or count)
+    const unsubAdmin = onSnapshot(
+      qAdmin,
+      (snap) => {
+        // Filter by status and sort client-side to avoid composite index
+        const posts = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter((post: any) => !post.status || post.status === 'active')
+          .sort((a: any, b: any) => {
+            const getTs = (p: any) => p.timestamp?.seconds ?? p.createdAt?.seconds ?? 0;
+            return getTs(b) - getTs(a);
+          });
+        setAdminPosts(posts);
+      },
+      async (err: any) => {
+        console.error('Player feed (admin) error:', err?.message);
+        setAdminPosts([]);
+      }
+    );
+
+    // Stop loading after all queries have run at least once (use a short delay or count)
     const t = setTimeout(() => setLoading(false), 800);
 
     return () => {
       unsubPlayer();
       unsubAcademy();
+      unsubAdmin();
       clearTimeout(t);
     };
   }, []);
@@ -126,7 +168,13 @@ export default function PlayerFeedScreen() {
         <View style={styles.feedHeader}>
           <View style={styles.feedAuthorContainer}>
             <Ionicons name="person-circle-outline" size={24} color="#000" />
-            <Text style={styles.feedAuthor}>{item.author || 'Anonymous'}</Text>
+            <Text 
+              style={styles.feedAuthor}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {item.author || 'Anonymous'}
+            </Text>
           </View>
           <View style={styles.feedHeaderRight}>
             {timestamp && (
@@ -358,16 +406,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
   },
   feedAuthorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    marginRight: 8,
   },
   feedAuthor: {
     fontWeight: 'bold',
     color: '#000',
     fontSize: 16,
+    flexShrink: 1,
   },
   feedTime: {
     color: '#999',

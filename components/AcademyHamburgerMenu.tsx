@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { I18nManager, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, I18nManager, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import i18n from '../locales/i18n';
 
 interface AcademyHamburgerMenuProps {
@@ -33,7 +33,14 @@ const AcademyHamburgerMenu: React.FC<AcademyHamburgerMenuProps> = ({ visible, on
               style={[styles.menuItem, item.special && styles.specialMenuItem]}
               onPress={() => {
                 onClose();
-                if (item.route === '/academy-feed') {
+                if (item.special && item.route === '/academy-services') {
+                  // Show "coming soon" popup for Assistance & Extras
+                  Alert.alert(
+                    i18n.t('comingSoon') || 'Coming Soon',
+                    i18n.t('comingSoonMessage') || 'This feature is coming soon!',
+                    [{ text: i18n.t('ok') || 'OK' }]
+                  );
+                } else if (item.route === '/academy-feed') {
                   router.replace(item.route as any);
                 } else {
                   router.push(item.route as any);
