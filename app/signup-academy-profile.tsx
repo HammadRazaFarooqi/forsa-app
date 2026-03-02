@@ -186,10 +186,13 @@ const SignupAcademy = () => {
       setLoading(true);
       setFormError('');
 
-      // Step 1: Create Firebase Auth user
+      // Step 1: Create Firebase Auth user — use real email when provided (unique per user), else phone-based
       const normalizedPhone = normalizePhoneForTwilio(phone);
       const phoneForAuth = normalizePhoneForAuth(normalizedPhone);
-      const authEmail = `user_${phoneForAuth}@forsa.app`;
+      const authEmail =
+        email && email.trim().length > 0
+          ? email.trim().toLowerCase()
+          : `user_${phoneForAuth}@forsa.app`;
 
       const userCredential = await createUserWithEmailAndPassword(auth, authEmail, password);
       const uid = userCredential.user.uid;
@@ -235,7 +238,7 @@ const SignupAcademy = () => {
       console.log('[Signup] Error:', err.message);
       let errorMsg = i18n.t('signupFailedMessage');
       if (err.code === 'auth/email-already-in-use') {
-        errorMsg = i18n.t('emailAlreadyRegistered') || 'This phone number is already registered';
+        errorMsg = i18n.t('emailAlreadyRegistered') || 'This email or phone number is already registered. Use a different email or sign in.';
       } else if (err.code === 'auth/weak-password') {
         errorMsg = i18n.t('weakPassword') || 'Password is too weak';
       } else if (err.message) {

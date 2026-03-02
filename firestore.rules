@@ -140,11 +140,12 @@ service cloud.firestore {
     // /bookings, /conversations, /messages, /checkins, /notifications, /reports
     // =========================
     match /bookings/{bookingId} {
-      // User involved OR admin
+      // User involved (as customer or provider) OR admin
       allow get, read: if isAuthed() && (
         resource.data.playerId == request.auth.uid ||
         resource.data.parentId == request.auth.uid ||
         resource.data.userId == request.auth.uid ||
+        resource.data.academyId == request.auth.uid ||
         resource.data.providerId == request.auth.uid ||
         isAdmin()
       );
@@ -152,10 +153,12 @@ service cloud.firestore {
       // Queries are allowed for authed users; per-doc read still enforced above.
       allow list: if isAuthed();
 
+      // Create: requester must be the customer (player, parent, userId, or academy)
       allow create: if isAuthed() && (
         request.resource.data.playerId == request.auth.uid ||
         request.resource.data.parentId == request.auth.uid ||
         request.resource.data.userId == request.auth.uid ||
+        request.resource.data.academyId == request.auth.uid ||
         isAdmin()
       );
 
@@ -163,6 +166,7 @@ service cloud.firestore {
         resource.data.playerId == request.auth.uid ||
         resource.data.parentId == request.auth.uid ||
         resource.data.userId == request.auth.uid ||
+        resource.data.academyId == request.auth.uid ||
         resource.data.providerId == request.auth.uid ||
         isAdmin()
       );

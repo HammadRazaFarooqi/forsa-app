@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useRef, useState, useEffect } from 'react';
-import { Alert, Animated, Easing, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import { Alert, Animated, Easing, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import i18n from '../locales/i18n';
 import { auth, db } from '../lib/firebase';
 import { doc, getDoc, collection, addDoc } from 'firebase/firestore';
@@ -14,6 +14,9 @@ export default function AcademyClinicDetailsScreen() {
   const [clinic, setClinic] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [bookingLoading, setBookingLoading] = useState(false);
+  const [selectedServiceIndex, setSelectedServiceIndex] = useState(0);
+  const [selectedDoctorIndex, setSelectedDoctorIndex] = useState(0);
+  const [bookingComments, setBookingComments] = useState('');
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -118,12 +121,20 @@ export default function AcademyClinicDetailsScreen() {
     }
   };
 
-  const handleReserve = async (doctor: string) => {
+  const handleReserve = async (doctor?: string) => {
     const user = auth.currentUser;
     if (!user) {
       Alert.alert(i18n.t('error'), i18n.t('loginRequired') || 'You must be logged in to book');
       return;
     }
+
+    const selectedDoctor =
+      doctor ?? (clinic.doctors && clinic.doctors.length > 0 ? clinic.doctors[selectedDoctorIndex] : null);
+    const doctorName = selectedDoctor || (i18n.t('noSpecificDoctor') || 'No specific doctor');
+    const serviceList = clinic.services && clinic.services.length > 0 ? clinic.services : [];
+    const selectedService = serviceList[selectedServiceIndex];
+    const serviceName = selectedService ? selectedService.name : 'General';
+    const servicePrice = selectedService ? Number(selectedService.fee) || 0 : 0;
 
     try {
       setBookingLoading(true);
@@ -138,10 +149,6 @@ export default function AcademyClinicDetailsScreen() {
       } catch (err) {
       }
 
-      const firstService = clinic.services && clinic.services[0];
-      const serviceName = firstService ? firstService.name : 'General';
-      const servicePrice = firstService ? Number(firstService.fee) || 0 : 0;
-
       const bookingData = {
         academyId: user.uid,
         customerName: academyName,
@@ -153,9 +160,10 @@ export default function AcademyClinicDetailsScreen() {
         createdAt: new Date().toISOString(),
         name: clinic.name,
         city: clinic.city,
-        doctor: doctor,
+        doctor: doctorName,
         service: serviceName,
         price: servicePrice,
+        comments: bookingComments.trim() || null,
       };
 
       const bookingRef = await addDoc(collection(db, 'bookings'), bookingData);
@@ -165,7 +173,7 @@ export default function AcademyClinicDetailsScreen() {
           await notifyProviderAndAdmins(
             providerId,
             i18n.t('newBookingRequest') || 'New booking request',
-            `${customerName} ${i18n.t('requestedBooking') || 'requested a booking'}: ${serviceName}`,
+            `${academyName} ${i18n.t('requestedBooking') || 'requested a booking'}: ${serviceName}`,
             'booking',
             { bookingId: bookingRef.id },
             user.uid
@@ -301,6 +309,75 @@ export default function AcademyClinicDetailsScreen() {
               ))}
             </View>
 
+            {/* Book appointment: service, doctor, comments, reserve */}
+            <View style={styles.bookingCard}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="calendar" size={24} color="#000" />
+                <Text style={styles.cardTitle}>{i18n.t('bookAppointment') || 'Book appointment'}</Text>
+              </View>
+
+              <Text style={styles.bookingLabel}>{i18n.t('selectService') || 'Select service'}</Text>
+              {clinic.services && clinic.services.length > 0 ? (
+                <View style={styles.serviceOptions}>
+                  {clinic.services.map((svc: any, idx: number) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[styles.serviceOption, selectedServiceIndex === idx && styles.serviceOptionSelected]}
+                      onPress={() => setSelectedServiceIndex(idx)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.serviceOptionText}>{svc.name}</Text>
+                      <Text style={styles.serviceOptionFee}>{svc.fee} EGP</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.bookingHint}>{i18n.t('noServicesListed') || 'No services listed'}</Text>
+              )}
+
+              <Text style={styles.bookingLabel}>{i18n.t('selectDoctor') || 'Select doctor'}</Text>
+              {clinic.doctors && clinic.doctors.length > 0 ? (
+                <View style={styles.serviceOptions}>
+                  {clinic.doctors.map((docName: string, idx: number) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[styles.serviceOption, selectedDoctorIndex === idx && styles.serviceOptionSelected]}
+                      onPress={() => setSelectedDoctorIndex(idx)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.serviceOptionText}>{docName}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.bookingHint}>{i18n.t('noDoctorsListed') || 'No doctors listed'}</Text>
+              )}
+
+              <Text style={styles.bookingLabel}>{i18n.t('additionalComments') || 'Additional comments (optional)'}</Text>
+              <TextInput
+                style={styles.commentsInput}
+                placeholder={i18n.t('commentsPlaceholder') || 'Any special requests or notes...'}
+                placeholderTextColor="#999"
+                value={bookingComments}
+                onChangeText={setBookingComments}
+                multiline
+                numberOfLines={3}
+              />
+
+              <TouchableOpacity
+                style={[styles.reserveButton, bookingLoading && styles.reserveButtonDisabled]}
+                onPress={() => handleReserve()}
+                disabled={bookingLoading || !clinic.services || clinic.services.length === 0}
+                activeOpacity={0.8}
+              >
+                {bookingLoading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.reserveButtonText}>{i18n.t('reserve') || 'Reserve'}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
             <View style={styles.doctorsCard}>
               <View style={styles.cardHeader}>
                 <Ionicons name="people" size={24} color="#000" />
@@ -308,23 +385,10 @@ export default function AcademyClinicDetailsScreen() {
               </View>
               {clinic.doctors && clinic.doctors.length > 0 ? (
                 clinic.doctors.map((doctor: string, idx: number) => (
-                  <TouchableOpacity
-                    key={idx}
-                    style={styles.doctorButton}
-                    onPress={() => handleReserve(doctor)}
-                    disabled={bookingLoading}
-                    activeOpacity={0.8}
-                  >
-                    {bookingLoading ? (
-                      <ActivityIndicator size="small" color="#000" />
-                    ) : (
-                      <>
-                        <Ionicons name="person" size={20} color="#000" style={styles.doctorIcon} />
-                        <Text style={styles.doctorName}>{doctor}</Text>
-                        <Ionicons name="calendar" size={20} color="#000" />
-                      </>
-                    )}
-                  </TouchableOpacity>
+                  <View key={idx} style={styles.doctorButton}>
+                    <Ionicons name="person" size={20} color="#000" style={styles.doctorIcon} />
+                    <Text style={styles.doctorName}>{doctor}</Text>
+                  </View>
                 ))
               ) : (
                 <Text style={{ color: '#666', fontStyle: 'italic', padding: 8 }}>{i18n.t('noDoctorsListed') || 'No doctors listed'}</Text>
@@ -372,4 +436,16 @@ const styles = StyleSheet.create({
   serviceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
   serviceName: { fontSize: 16, color: '#000', flex: 1 },
   serviceFee: { fontSize: 16, fontWeight: 'bold', color: '#000', marginLeft: 12 },
+  bookingCard: { backgroundColor: '#fff', borderRadius: 24, padding: 24, marginBottom: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 10 },
+  bookingLabel: { fontSize: 14, fontWeight: '600', color: '#333', marginBottom: 8, marginTop: 4 },
+  serviceOptions: { marginBottom: 12 },
+  serviceOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#f5f5f5', padding: 14, borderRadius: 12, marginBottom: 8 },
+  serviceOptionSelected: { backgroundColor: '#e0e0e0', borderWidth: 2, borderColor: '#000' },
+  serviceOptionText: { fontSize: 16, color: '#000', flex: 1 },
+  serviceOptionFee: { fontSize: 14, fontWeight: '600', color: '#000' },
+  bookingHint: { fontSize: 14, color: '#666', fontStyle: 'italic', marginBottom: 12 },
+  commentsInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 12, padding: 12, fontSize: 15, color: '#000', minHeight: 80, textAlignVertical: 'top' },
+  reserveButton: { backgroundColor: '#000', borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 20 },
+  reserveButtonDisabled: { opacity: 0.6 },
+  reserveButtonText: { color: '#fff', fontSize: 17, fontWeight: 'bold' },
 });
