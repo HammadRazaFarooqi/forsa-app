@@ -547,6 +547,8 @@ export default {
   signup_clinic: 'Clinic Sign Up',
   service_price: 'Service Price',
   selectDoctor: "Select doctor",
+  clearFilters: "Clear filters",
+  time: "Time",
   startChat: "Start chat",
   "working_hours": "Working Hours",
   "from": "From",

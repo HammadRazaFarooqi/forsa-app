@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { collection, onSnapshot, getFirestore, orderBy, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, getFirestore, orderBy, query, where, getDocs } from 'firebase/firestore';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useRef } from 'react';
 import { ActivityIndicator, Animated, Easing, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -27,49 +27,86 @@ export default function PlayerFeedScreen() {
     }).start();
   }, []);
 
+  const [playerPosts, setPlayerPosts] = React.useState<any[]>([]);
+  const [academyPosts, setAcademyPosts] = React.useState<any[]>([]);
+
+  // Merge and sort: player's posts + all academy posts (real posts from Firestore)
+  React.useEffect(() => {
+    const active = (p: any) => !p.status || p.status === 'active';
+    const getTs = (p: any) => p.timestamp?.seconds ?? p.createdAt?.seconds ?? 0;
+    const merged = [...playerPosts.filter(active), ...academyPosts.filter(active)]
+      .sort((a, b) => getTs(b) - getTs(a));
+    setFeed(merged);
+  }, [playerPosts, academyPosts]);
+
   React.useEffect(() => {
     setLoading(true);
     const user = auth.currentUser;
     if (!user) {
-      setFeed([]);
+      setPlayerPosts([]);
+      setAcademyPosts([]);
       setLoading(false);
       return;
     }
 
     const db = getFirestore();
     const postsRef = collection(db, 'posts');
-    
-    // Player feed: Show only posts where ownerId == currentUser.uid
-    // Also filter by status if field exists (backward compatibility)
-    const q = query(
+
+    // 1) Player's own posts
+    const qPlayer = query(
       postsRef,
       where('ownerId', '==', user.uid),
       orderBy('timestamp', 'desc')
     );
 
-    // Set up real-time listener
-    const unsubscribe = onSnapshot(
-      q,
-      (querySnapshot) => {
-        const posts = querySnapshot.docs
-          .map(doc => ({ 
-            id: doc.id, 
-            ...doc.data() 
-          }))
-          // Filter out deleted posts (backward compatibility: if status field exists, only show active)
-          .filter((post: any) => !post.status || post.status === 'active');
-        setFeed(posts);
-        setLoading(false);
+    // 2) All academy posts (every academy's posts shown to players)
+    const qAcademy = query(
+      postsRef,
+      where('ownerRole', '==', 'academy'),
+      orderBy('timestamp', 'desc')
+    );
+
+    const unsubPlayer = onSnapshot(
+      qPlayer,
+      (snap) => {
+        const posts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setPlayerPosts(posts);
       },
-      (error) => {
-        console.error('Feed listener error:', error);
-        setFeed([]);
-        setLoading(false);
+      (err) => {
+        console.error('Player feed (own) error:', err);
+        setPlayerPosts([]);
       }
     );
 
-    // Cleanup listener on unmount
-    return () => unsubscribe();
+    const unsubAcademy = onSnapshot(
+      qAcademy,
+      (snap) => {
+        const posts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setAcademyPosts(posts);
+      },
+      async (err: any) => {
+        console.warn('Player feed (academy) index may be missing, falling back:', err?.message);
+        try {
+          const fallback = query(postsRef, where('ownerRole', '==', 'academy'));
+          const snap = await getDocs(fallback);
+          const posts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const getTs = (p: any) => p.timestamp?.seconds ?? p.createdAt?.seconds ?? 0;
+          posts.sort((a, b) => getTs(b) - getTs(a));
+          setAcademyPosts(posts);
+        } catch (e) {
+          setAcademyPosts([]);
+        }
+      }
+    );
+
+    // Stop loading after both have run at least once (use a short delay or count)
+    const t = setTimeout(() => setLoading(false), 800);
+
+    return () => {
+      unsubPlayer();
+      unsubAcademy();
+      clearTimeout(t);
+    };
   }, []);
 
   const renderFeedItem = (item: any) => {

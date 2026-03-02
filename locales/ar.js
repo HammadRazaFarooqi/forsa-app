@@ -611,6 +611,8 @@ export default {
   confirm_password_required: 'تأكيد كلمة المرور مطلوب',
   password_mismatch: 'كلمات المرور غير متطابقة',
   child_names: 'أسماء الأطفال',
+  clearFilters: "مسح الفلاتر",
+  time: "الوقت",
   child_names_placeholder: 'Enter names of children (comma separated)',
   add_child: 'Add Child',
   selectDoctor: "اختر الطبيب",

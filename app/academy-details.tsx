@@ -14,11 +14,20 @@ type Academy = {
   city: string;
   description: string;
   fees: Record<string, number>;
+  schedule?: Record<string, { day: string; time: string }>;
   images?: any[];
   address?: string;
   phone?: string;
   profilePhoto?: string;
 };
+
+function formatTimeForDisplay(time24: string): string {
+  if (!time24 || !/^([01]\d|2[0-3]):([0-5]\d)$/.test(time24)) return time24;
+  const [hours, minutes] = time24.split(':').map(Number);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const hours12 = hours % 12 || 12;
+  return `${hours12}:${minutes.toString().padStart(2, '0')} ${period}`;
+}
 
 type RouteParams = {
   params: {
@@ -64,6 +73,7 @@ export default function AcademyDetailsScreen() {
             city: data.city || '',
             description: data.description || '',
             fees: data.fees || {},
+            schedule: data.schedule || {},
             address: data.address || '',
             phone: data.phone || '',
             images: data.images || [],
@@ -73,19 +83,17 @@ export default function AcademyDetailsScreen() {
           setPosts(data.posts || []);
           setImages(data.images || []);
         } else {
-          // Fallback to parsed data
-          setAcademy(parsed);
+          setAcademy({ ...parsed, schedule: (parsed as any).schedule || {} });
           setOfferings([]);
           setPosts([]);
           setImages(parsed.images || []);
         }
       } catch (err) {
         console.error('Error fetching academy:', err);
-        // Fallback to parsed data
-        setAcademy(parsed);
+        setAcademy(parsed ? { ...parsed, schedule: (parsed as any).schedule || {} } : null);
         setOfferings([]);
         setPosts([]);
-        setImages(parsed.images || []);
+        setImages(parsed?.images || []);
       } finally {
         setLoading(false);
       }
@@ -149,11 +157,12 @@ export default function AcademyDetailsScreen() {
       } catch (err) {
       }
 
+      const slot = academy.schedule?.[selectedAge];
       const bookingData = {
         playerId: user.uid,
-        parentId: user.uid, // Add parentId for consistency with parent-bookings.tsx
+        parentId: user.uid,
         playerName: playerName,
-        customerName: playerName, // Standardized field for admin
+        customerName: playerName,
         providerId: academy.id,
         providerName: academy.name,
         type: 'academy',
@@ -165,6 +174,8 @@ export default function AcademyDetailsScreen() {
         ageGroup: selectedAge,
         program: `${selectedAge} years`,
         price: Number(price),
+        day: slot?.day || null,
+        time: slot?.time || null,
       };
 
       const bookingRef = await addDoc(collection(db, 'bookings'), bookingData);
@@ -381,6 +392,16 @@ export default function AcademyDetailsScreen() {
                   <Text style={styles.selectedPriceText}>
                     {i18n.t('price') || 'Price'}: {selectedPrice} EGP/{i18n.t('month') || 'month'}
                   </Text>
+                  {academy.schedule?.[selectedAge]?.day && (
+                    <Text style={styles.selectedScheduleText}>
+                      {i18n.t('day') || 'Day'}: {i18n.t(academy.schedule[selectedAge].day) || academy.schedule[selectedAge].day}
+                    </Text>
+                  )}
+                  {academy.schedule?.[selectedAge]?.time && (
+                    <Text style={styles.selectedScheduleText}>
+                      {i18n.t('time') || 'Time'}: {formatTimeForDisplay(academy.schedule[selectedAge].time)}
+                    </Text>
+                  )}
                 </View>
               )}
             </View>
@@ -405,26 +426,36 @@ export default function AcademyDetailsScreen() {
                     </TouchableOpacity>
                   </View>
                   <ScrollView style={styles.modalScrollView}>
-                    {availableAges.map((age) => (
-                      <TouchableOpacity
-                        key={age}
-                        style={[styles.modalOption, selectedAge === age && styles.modalOptionSelected]}
-                        onPress={() => {
-                          setSelectedAge(age);
-                          setAgeModalVisible(false);
-                        }}
-                      >
-                        <View style={styles.modalOptionContent}>
-                          <Text style={[styles.modalOptionText, selectedAge === age && styles.modalOptionTextSelected]}>
-                            {age} {i18n.t('years') || 'years'}
-                          </Text>
-                          <Text style={[styles.modalOptionPrice, selectedAge === age && styles.modalOptionPriceSelected]}>
-                            {academy.fees[age]} EGP
-                          </Text>
-                        </View>
-                        {selectedAge === age && <Ionicons name="checkmark" size={20} color="#fff" />}
-                      </TouchableOpacity>
-                    ))}
+                    {availableAges.map((age) => {
+                      const slot = academy.schedule?.[age];
+                      return (
+                        <TouchableOpacity
+                          key={age}
+                          style={[styles.modalOption, selectedAge === age && styles.modalOptionSelected]}
+                          onPress={() => {
+                            setSelectedAge(age);
+                            setAgeModalVisible(false);
+                          }}
+                        >
+                          <View style={styles.modalOptionContent}>
+                            <View style={styles.modalOptionLeft}>
+                              <Text style={[styles.modalOptionText, selectedAge === age && styles.modalOptionTextSelected]}>
+                                {age} {i18n.t('years') || 'years'}
+                              </Text>
+                              {(slot?.day || slot?.time) && (
+                                <Text style={[styles.modalOptionSchedule, selectedAge === age && styles.modalOptionScheduleSelected]}>
+                                  {slot?.day ? (i18n.t(slot.day) || slot.day) : ''}{slot?.day && slot?.time ? ' • ' : ''}{slot?.time ? formatTimeForDisplay(slot.time) : ''}
+                                </Text>
+                              )}
+                            </View>
+                            <Text style={[styles.modalOptionPrice, selectedAge === age && styles.modalOptionPriceSelected]}>
+                              {academy.fees[age]} EGP
+                            </Text>
+                          </View>
+                          {selectedAge === age && <Ionicons name="checkmark" size={20} color="#fff" />}
+                        </TouchableOpacity>
+                      );
+                    })}
                   </ScrollView>
                 </View>
               </TouchableOpacity>
@@ -795,6 +826,11 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#000',
   },
+  selectedScheduleText: {
+    fontSize: 15,
+    color: '#333',
+    marginTop: 4,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -857,6 +893,18 @@ const styles = StyleSheet.create({
   modalOptionPriceSelected: {
     color: '#fff',
     fontWeight: 'bold',
+  },
+  modalOptionSchedule: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
+  modalOptionScheduleSelected: {
+    color: 'rgba(255,255,255,0.9)',
+  },
+  modalOptionLeft: {
+    flex: 1,
+    minWidth: 0,
   },
   backButton: {
     backgroundColor: '#000',

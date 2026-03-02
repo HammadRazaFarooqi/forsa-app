@@ -22,7 +22,8 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
+  useWindowDimensions,
 } from 'react-native';
 import { uploadImageToStorage } from '../lib/firebaseHelpers';
 import {
@@ -37,8 +38,32 @@ import {
 import i18n from '../locales/i18n';
 import { getBackendUrl } from '../lib/config';
 
+function isValidTimeFormat(time: string): boolean {
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(time); // HH:mm 00:00 to 23:59 (same as clinic)
+}
+
+const DAYS_OF_WEEK = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+// Time options in 15-min increments (same as clinic)
+const TIME_OPTIONS: string[] = [];
+for (let h = 0; h < 24; h++) {
+  for (let m = 0; m < 60; m += 15) {
+    TIME_OPTIONS.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
+  }
+}
+
+function formatTime12Hour(time24: string): string {
+  if (!time24 || !isValidTimeFormat(time24)) return time24;
+  const [hours, minutes] = time24.split(':').map(Number);
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const hours12 = hours % 12 || 12;
+  return `${hours12}:${minutes.toString().padStart(2, '0')} ${period}`;
+}
+
 const SignupAcademy = () => {
   const router = useRouter();
+  const { width: screenWidth } = useWindowDimensions();
+  const isNarrow = screenWidth < 380;
   const [academyName, setAcademyName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -50,6 +75,8 @@ const SignupAcademy = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [fees, setFees] = useState<{ [age: string]: string }>({});
+  const [schedule, setSchedule] = useState<{ [age: string]: { day: string; time: string } }>({});
+  const [scheduleDropdown, setScheduleDropdown] = useState<{ age: string; type: 'day' | 'time' } | null>(null);
   const [selectedAge, setSelectedAge] = useState<string | null>(null);
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [missing, setMissing] = useState<{ [key: string]: boolean }>({});
@@ -184,6 +211,7 @@ const SignupAcademy = () => {
         address,
         description,
         fees,
+        schedule: schedule,
         profilePhoto: profilePhotoUrl,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -483,6 +511,79 @@ const SignupAcademy = () => {
                   </View>
                 ))}
                 {errors.fees && <Text style={styles.errorText}>{errors.fees}</Text>}
+              </View>
+
+              {/* Schedule (day + time) per age group - theme-aligned, responsive */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>{i18n.t('schedulePerAgeGroup') || 'Training schedule (day & time per age group)'}</Text>
+                {ageGroups.map((age) => (
+                  <View
+                    key={age}
+                    style={[
+                      styles.scheduleRow,
+                      isNarrow && styles.scheduleRowNarrow,
+                      { position: 'relative', zIndex: scheduleDropdown?.age === age ? 10 : 1 },
+                    ]}
+                  >
+                    <Text style={styles.scheduleAgeLabel} numberOfLines={1}>{age} {i18n.t('years') || 'yrs'}</Text>
+                    <View style={styles.schedulePickersWrap}>
+                      <TouchableOpacity
+                        style={styles.schedulePickerBtn}
+                        onPress={() => setScheduleDropdown(prev => prev?.age === age && prev?.type === 'day' ? null : { age, type: 'day' })}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.schedulePickerText} numberOfLines={1}>
+                          {schedule[age]?.day ? (i18n.t(schedule[age].day) || schedule[age].day) : (i18n.t('day') || 'Day')}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.schedulePickerBtn}
+                        onPress={() => setScheduleDropdown(prev => prev?.age === age && prev?.type === 'time' ? null : { age, type: 'time' })}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.schedulePickerText} numberOfLines={1}>
+                          {schedule[age]?.time ? formatTime12Hour(schedule[age].time) : (i18n.t('time') || 'Time')}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    {scheduleDropdown?.age === age && (
+                      <View style={[styles.scheduleDropdown, { maxWidth: screenWidth - 48 }, isNarrow && styles.scheduleDropdownNarrow]}>
+                        <ScrollView style={styles.scheduleDropdownScroll} showsVerticalScrollIndicator={true}>
+                          {scheduleDropdown.type === 'day'
+                            ? DAYS_OF_WEEK.map((day) => (
+                                <TouchableOpacity
+                                  key={day}
+                                  onPress={() => {
+                                    setSchedule(s => ({ ...s, [age]: { ...(s[age] || { day: '', time: '' }), day } }));
+                                    setScheduleDropdown(null);
+                                  }}
+                                  style={[styles.scheduleDropdownItem, schedule[age]?.day === day && styles.scheduleDropdownItemSelected]}
+                                  activeOpacity={0.7}
+                                >
+                                  <Text style={styles.scheduleDropdownItemText}>{i18n.t(day) || day}</Text>
+                                </TouchableOpacity>
+                              ))
+                            : TIME_OPTIONS.map((t) => (
+                                <TouchableOpacity
+                                  key={t}
+                                  onPress={() => {
+                                    setSchedule(s => ({ ...s, [age]: { ...(s[age] || { day: '', time: '' }), time: t } }));
+                                    setScheduleDropdown(null);
+                                  }}
+                                  style={[styles.scheduleDropdownItem, schedule[age]?.time === t && styles.scheduleDropdownItemSelected]}
+                                  activeOpacity={0.7}
+                                >
+                                  <Text style={styles.scheduleDropdownItemText}>{t}</Text>
+                                </TouchableOpacity>
+                              ))}
+                        </ScrollView>
+                        <TouchableOpacity onPress={() => setScheduleDropdown(null)} style={styles.scheduleDropdownCancel} activeOpacity={0.8}>
+                          <Text style={styles.scheduleDropdownCancelText}>{i18n.t('cancel') || 'Cancel'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                ))}
               </View>
 
               <TouchableOpacity
@@ -817,6 +918,98 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 6,
     fontWeight: '500',
+  },
+  scheduleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 10,
+    minHeight: 44,
+  },
+  scheduleRowNarrow: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 6,
+    marginBottom: 14,
+  },
+  scheduleAgeLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#000',
+    minWidth: 48,
+    width: 48,
+  },
+  schedulePickersWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    minWidth: 0,
+  },
+  schedulePickerBtn: {
+    flex: 1,
+    minWidth: 72,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#f5f5f5',
+    justifyContent: 'center',
+  },
+  schedulePickerText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  scheduleDropdown: {
+    position: 'absolute',
+    top: 44,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    zIndex: 100,
+    maxHeight: 220,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+  },
+  scheduleDropdownScroll: {
+    maxHeight: 180,
+  },
+  scheduleDropdownItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  scheduleDropdownItemSelected: {
+    backgroundColor: '#f0f0f0',
+  },
+  scheduleDropdownItemText: {
+    color: '#000',
+    fontSize: 15,
+  },
+  scheduleDropdownCancel: {
+    padding: 12,
+    alignItems: 'center',
+    borderTopWidth: 2,
+    borderTopColor: '#e0e0e0',
+    backgroundColor: '#fafafa',
+  },
+  scheduleDropdownCancelText: {
+    color: '#000',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  scheduleDropdownNarrow: {
+    top: 76,
+    left: 0,
   },
 });
 
