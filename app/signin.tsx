@@ -350,16 +350,6 @@ const SignInScreen = () => {
                 )}
               </View>
 
-              {/* Forgot Password */}
-              <TouchableOpacity
-                onPress={() => router.push("/forgot-password")}
-                style={styles.forgotPassword}
-              >
-                <Text style={styles.forgotPasswordText}>
-                  {i18n.t("forgotPassword")}
-                </Text>
-              </TouchableOpacity>
-
               {/* Error Message */}
               {errors.submit && (
                 <View style={styles.errorContainer}>

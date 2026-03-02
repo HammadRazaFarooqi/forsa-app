@@ -3,7 +3,7 @@ import { useRouter } from 'expo-router';
 import { collection, onSnapshot, getFirestore, orderBy, query, where, getDocs } from 'firebase/firestore';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useRef } from 'react';
-import { ActivityIndicator, Animated, Easing, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Image, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
@@ -16,6 +16,7 @@ export default function PlayerFeedScreen() {
   const { openMenu } = useHamburgerMenu();
   const [feed, setFeed] = React.useState<any[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [fullScreenMedia, setFullScreenMedia] = React.useState<{ uri: string; type: 'image' | 'video' } | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
@@ -72,7 +73,11 @@ export default function PlayerFeedScreen() {
         const posts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         setPlayerPosts(posts);
       },
-      (err) => {
+      (err: any) => {
+        if (err?.code === 'permission-denied' || err?.message?.includes('permission')) {
+          setPlayerPosts([]);
+          return;
+        }
         console.error('Player feed (own) error:', err);
         setPlayerPosts([]);
       }
@@ -159,6 +164,13 @@ export default function PlayerFeedScreen() {
                 resizeMode="cover"
               />
             )}
+            <TouchableOpacity
+              style={styles.fullScreenButton}
+              onPress={() => setFullScreenMedia({ uri: item.mediaUrl, type: item.mediaType === 'video' ? 'video' : 'image' })}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="expand" size={24} color="#fff" />
+            </TouchableOpacity>
           </View>
         )}
         
@@ -211,6 +223,44 @@ export default function PlayerFeedScreen() {
           </ScrollView>
         </Animated.View>
       </LinearGradient>
+
+      {/* Full Screen Media Viewer */}
+      <Modal
+        visible={!!fullScreenMedia}
+        transparent={false}
+        animationType="fade"
+        onRequestClose={() => setFullScreenMedia(null)}
+        statusBarTranslucent={true}
+      >
+        <View style={styles.fullScreenContainer}>
+          <TouchableOpacity
+            style={styles.fullScreenCloseButton}
+            onPress={() => setFullScreenMedia(null)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="close" size={32} color="#fff" />
+          </TouchableOpacity>
+          {fullScreenMedia && (
+            <View style={styles.fullScreenContent}>
+              {fullScreenMedia.type === 'video' ? (
+                <Video
+                  source={{ uri: fullScreenMedia.uri }}
+                  style={styles.fullScreenVideo}
+                  useNativeControls
+                  resizeMode={ResizeMode.CONTAIN}
+                  isLooping={false}
+                />
+              ) : (
+                <Image
+                  source={{ uri: fullScreenMedia.uri }}
+                  style={styles.fullScreenImage}
+                  resizeMode="contain"
+                />
+              )}
+            </View>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -345,5 +395,51 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 300,
     backgroundColor: '#000',
+  },
+  fullScreenButton: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  fullScreenContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+    height: '100%',
+  },
+  fullScreenCloseButton: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 40,
+    right: 20,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenContent: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenImage: {
+    width: '100%',
+    height: '100%',
+  },
+  fullScreenVideo: {
+    width: '100%',
+    height: '100%',
   },
 });

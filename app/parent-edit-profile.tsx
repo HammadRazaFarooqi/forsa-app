@@ -7,6 +7,9 @@ import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
 import { auth, db } from '../lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { uploadMedia } from '../services/MediaService';
+import * as ImagePicker from 'expo-image-picker';
+import { Image } from 'react-native';
 
 const cities = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>).map(([key, label]) => ({ key, label }));
 
@@ -20,6 +23,8 @@ export default function ParentEditProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [cityModal, setCityModal] = useState(false);
   const [children, setChildren] = useState<{ name: string; age: string }[]>([{ name: '', age: '' }]);
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+  const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -52,6 +57,10 @@ export default function ParentEditProfileScreen() {
         setEmail(data.email || '');
         setPhone(data.phone || '');
         setCity(data.city || '');
+        if (data.profilePhoto) {
+          setProfilePhoto(data.profilePhoto);
+          setProfilePhotoUrl(data.profilePhoto);
+        }
         if (data.children && Array.isArray(data.children) && data.children.length > 0) {
           setChildren(data.children);
         }
@@ -66,6 +75,10 @@ export default function ParentEditProfileScreen() {
           setEmail(data.email || '');
           setPhone(data.phone || '');
           setCity(data.city || '');
+          if (data.profilePhoto) {
+            setProfilePhoto(data.profilePhoto);
+            setProfilePhotoUrl(data.profilePhoto);
+          }
           if (data.children && Array.isArray(data.children) && data.children.length > 0) {
             setChildren(data.children);
           }
@@ -79,15 +92,22 @@ export default function ParentEditProfileScreen() {
     }
   };
 
-  const handleSave = async () => {
-    if (!name || !phone || !city) {
-      Alert.alert(i18n.t('error'), i18n.t('fillAllFields'));
-      return;
+  const handlePickPhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      setProfilePhoto(result.assets[0].uri);
     }
+  };
 
-    const validChildren = children.filter(c => c.name.trim() !== '' && c.age.trim() !== '');
-    if (validChildren.length === 0) {
-      Alert.alert(i18n.t('error'), 'Please add at least one child.');
+  const handleSave = async () => {
+    // Only require phone number - other fields are optional
+    if (!phone || !phone.trim()) {
+      Alert.alert(i18n.t('error'), i18n.t('phoneRequired') || 'Phone number is required');
       return;
     }
 
@@ -99,14 +119,36 @@ export default function ParentEditProfileScreen() {
         return;
       }
 
-      const updateData = {
-        parentName: name,
-        email: email,
-        phone: phone,
-        city: city,
-        children: validChildren,
+      let finalProfilePhotoUrl = profilePhotoUrl;
+
+      // Upload profile photo if it's a new local image
+      if (profilePhoto && profilePhoto !== profilePhotoUrl && 
+          (profilePhoto.startsWith('file://') || profilePhoto.startsWith('content://'))) {
+        try {
+          const cloudinaryResponse = await uploadMedia(profilePhoto, 'image');
+          finalProfilePhotoUrl = cloudinaryResponse.secure_url;
+          setProfilePhotoUrl(finalProfilePhotoUrl);
+        } catch (error) {
+          console.error('Error uploading profile photo:', error);
+          Alert.alert(i18n.t('error'), 'Failed to upload profile photo');
+          setSaving(false);
+          return;
+        }
+      }
+
+      const validChildren = children.filter(c => c.name.trim() !== '' && c.age.trim() !== '');
+
+      const updateData: any = {
+        phone: phone.trim(),
         updatedAt: new Date().toISOString()
       };
+
+      // Only include optional fields if they have values
+      if (name && name.trim()) updateData.parentName = name.trim();
+      if (email && email.trim()) updateData.email = email.trim();
+      if (city && city.trim()) updateData.city = city.trim();
+      if (validChildren.length > 0) updateData.children = validChildren;
+      if (finalProfilePhotoUrl) updateData.profilePhoto = finalProfilePhotoUrl;
 
       // Update both
       await updateDoc(doc(db, 'parents', user.uid), updateData);
@@ -167,6 +209,23 @@ export default function ParentEditProfileScreen() {
             showsVerticalScrollIndicator={false}
           >
             <View style={styles.formCard}>
+              {/* Profile Photo */}
+              <View style={styles.profileSection}>
+                <TouchableOpacity onPress={handlePickPhoto} style={styles.profileImageContainer}>
+                  {profilePhoto ? (
+                    <Image source={{ uri: profilePhoto }} style={styles.profileImage} />
+                  ) : (
+                    <View style={styles.profileImagePlaceholder}>
+                      <Ionicons name="camera" size={32} color="#999" />
+                    </View>
+                  )}
+                  <View style={styles.profileImageOverlay}>
+                    <Ionicons name="camera" size={20} color="#fff" />
+                  </View>
+                </TouchableOpacity>
+                <Text style={styles.profileLabel}>{i18n.t('uploadProfilePic') || 'Upload Profile Picture'}</Text>
+              </View>
+
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>{i18n.t('parent_name')}</Text>
                 <View style={styles.inputWrapper}>
@@ -490,5 +549,48 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     letterSpacing: 0.5,
+  },
+  profileSection: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  profileImageContainer: {
+    position: 'relative',
+    marginBottom: 12,
+  },
+  profileImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 4,
+    borderColor: '#fff',
+  },
+  profileImagePlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 4,
+    borderColor: '#fff',
+  },
+  profileImageOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#fff',
+  },
+  profileLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
   },
 });

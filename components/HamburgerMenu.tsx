@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useSegments } from 'expo-router';
 import React, { useEffect, useState } from 'react';
-import { I18nManager, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, I18nManager, Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import i18n from '../locales/i18n';
 import { useHamburgerMenu } from './HamburgerMenuContext';
 import { useAuth } from '../context/AuthContext';
@@ -209,7 +209,14 @@ export default function HamburgerMenu() {
             {(role === 'player' || role === 'agent' || role === 'clinic' || role === 'academy') && (
               <TouchableOpacity
                 style={[styles.menuItem, styles.goldMenuItem]}
-                onPress={() => handleNavigate(assistanceRoute)}
+                onPress={() => {
+                  closeMenu();
+                  Alert.alert(
+                    i18n.t('comingSoon') || 'Coming Soon',
+                    i18n.t('comingSoonMessage') || 'This feature is coming soon!',
+                    [{ text: i18n.t('ok') || 'OK' }]
+                  );
+                }}
                 activeOpacity={0.7}
               >
                 <Ionicons name="star" size={20} color="#000" style={styles.menuIcon} />

@@ -8,7 +8,7 @@ import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
 import { auth, db } from '../lib/firebase';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { uploadImageToStorage } from '../lib/firebaseHelpers';
+import { uploadMedia } from '../services/MediaService';
 
 export default function PlayerProfileScreen() {
   const { openMenu } = useHamburgerMenu();
@@ -105,8 +105,9 @@ export default function PlayerProfileScreen() {
   };
 
   const handleSave = async () => {
-    if (!firstName.trim() || !lastName.trim() || !email.trim() || !phone.trim() || !city || !position || !dob) {
-      Alert.alert(i18n.t('missingFields') || 'Missing Fields', i18n.t('fillAllRequiredFields') || 'Please fill all required fields');
+    // Only require phone number - other fields are optional
+    if (!phone || !phone.trim()) {
+      Alert.alert(i18n.t('error') || 'Error', i18n.t('phoneRequired') || 'Phone number is required');
       return;
     }
 
@@ -120,15 +121,12 @@ export default function PlayerProfileScreen() {
 
       let finalProfilePhotoUrl = profilePhotoUrl;
 
-      // Upload profile photo to Firebase Storage if it's a new local image
-      // Check if profilePhoto is different from the stored URL and is a local file
+      // Upload profile photo to Cloudinary if it's a new local image
       if (profilePhoto && profilePhoto !== profilePhotoUrl && 
           (profilePhoto.startsWith('file://') || profilePhoto.startsWith('content://'))) {
         try {
-          finalProfilePhotoUrl = await uploadImageToStorage(
-            profilePhoto,
-            `players/${user.uid}/profilePhoto.jpg`
-          );
+          const cloudinaryResponse = await uploadMedia(profilePhoto, 'image');
+          finalProfilePhotoUrl = cloudinaryResponse.secure_url;
           setProfilePhotoUrl(finalProfilePhotoUrl);
         } catch (error) {
           console.error('Error uploading profile photo:', error);
@@ -138,18 +136,20 @@ export default function PlayerProfileScreen() {
         }
       }
 
-      // Prepare update data
-      const updateData = {
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email: email.trim(),
+      // Prepare update data - only include fields that have values
+      const updateData: any = {
         phone: phone.trim(),
-        city: city.trim(),
-        position: position.trim(),
-        dob: dob.trim(),
-        profilePhoto: finalProfilePhotoUrl || null,
         updatedAt: new Date().toISOString()
       };
+
+      // Only include optional fields if they have values
+      if (firstName && firstName.trim()) updateData.firstName = firstName.trim();
+      if (lastName && lastName.trim()) updateData.lastName = lastName.trim();
+      if (email && email.trim()) updateData.email = email.trim();
+      if (city && city.trim()) updateData.city = city.trim();
+      if (position && position.trim()) updateData.position = position.trim();
+      if (dob && dob.trim()) updateData.dob = dob.trim();
+      if (finalProfilePhotoUrl) updateData.profilePhoto = finalProfilePhotoUrl;
 
       // Update both 'players' and 'users' collections
       await updateDoc(doc(db, 'players', user.uid), updateData);

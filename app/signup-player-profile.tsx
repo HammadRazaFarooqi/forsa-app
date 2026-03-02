@@ -22,7 +22,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
-import { uploadImageToStorage } from '../lib/firebaseHelpers';
+import { uploadMedia } from '../services/MediaService';
 import { auth, db } from '../lib/firebase';
 import { writeEmailIndex } from '../lib/emailIndex';
 import {
@@ -279,17 +279,29 @@ const SignupPlayer = () => {
       const uid = user.uid;
       // console.log('[Signup] Firebase user created! UID:', uid);
 
-      // Step 2: Upload images to Firebase Storage
+      // Step 2: Upload images to Cloudinary
       const dobString = formatDateForDB(dob);
       let profilePhotoUrl = '';
       let nationalIdPhotoUrl = '';
       if (profilePhoto) {
-        // console.log('[Signup] Uploading profile photo...');
-        profilePhotoUrl = await uploadImageToStorage(profilePhoto, `users/${uid}/profile.jpg`);
+        // console.log('[Signup] Uploading profile photo to Cloudinary...');
+        try {
+          const cloudinaryResponse = await uploadMedia(profilePhoto, 'image');
+          profilePhotoUrl = cloudinaryResponse.secure_url;
+        } catch (error: any) {
+          console.error('Error uploading profile photo:', error);
+          throw new Error('Failed to upload profile photo. Please try again.');
+        }
       }
       if (nationalIdPhoto) {
-        // console.log('[Signup] Uploading national ID photo...');
-        nationalIdPhotoUrl = await uploadImageToStorage(nationalIdPhoto, `users/${uid}/nationalId.jpg`);
+        // console.log('[Signup] Uploading national ID photo to Cloudinary...');
+        try {
+          const cloudinaryResponse = await uploadMedia(nationalIdPhoto, 'image');
+          nationalIdPhotoUrl = cloudinaryResponse.secure_url;
+        } catch (error: any) {
+          console.error('Error uploading national ID photo:', error);
+          // Don't throw here, national ID photo is optional
+        }
       }
 
       // Step 3: Save extended player profile to Firestore

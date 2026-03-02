@@ -167,66 +167,87 @@ export default function AgentSearchScreen() {
       {/* Remove outer ScrollView, use FlatList for scrolling */}
       <FlatList
         ListHeaderComponent={
-          <View style={{ backgroundColor: '#000' }}>
+          <View style={{ backgroundColor: '#000', paddingBottom: 16, paddingHorizontal: 0 }}>
             <View style={styles.filtersContainer}>
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8 }}
-              onPress={() => setDropdownOpen((prev) => !prev)}
-            >
-              <Text style={{ fontWeight: 'bold', fontSize: 18 }}>{i18n.t('filters') || 'Filters'}</Text>
-              <Ionicons name={dropdownOpen ? 'chevron-up' : 'chevron-down'} size={22} color="#000" />
-            </TouchableOpacity>
-            {dropdownOpen && (
-              <View style={{ backgroundColor: '#f4f4f4', borderRadius: 18, marginTop: 8, padding: 12 }}>
-                {/* Name search */}
-                <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>{i18n.t('agentNamePlaceholder') || 'Agent Name'}</Text>
-                <View style={styles.searchInputWrap}>
-                  <Ionicons name="search" size={20} color="#888" style={{ marginRight: 8 }} />
-                  <TextInput
-                    style={styles.pillInput}
-                    placeholder={i18n.t('agentNamePlaceholder')}
-                    value={search}
-                    onChangeText={setSearch}
-                    placeholderTextColor="#888"
-                    returnKeyType="search"
-                    onSubmitEditing={handleSearch}
-                  />
+              <TouchableOpacity
+                style={styles.filterHeader}
+                onPress={() => setDropdownOpen((prev) => !prev)}
+                activeOpacity={0.7}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="filter" size={20} color="#000" style={{ marginRight: 8 }} />
+                  <Text style={styles.filterHeaderText}>{i18n.t('filters') || 'Filters'}</Text>
                 </View>
-                {/* City filter */}
-                <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8, marginTop: 12 }}>{i18n.t('city') || 'City'}</Text>
-                <View style={{ borderRadius: 28, backgroundColor: '#fff', marginBottom: 16 }}>
-                  <Picker
-                    selectedValue={city}
-                    onValueChange={setCity}
-                    style={{ color: '#000', fontSize: 18, width: '100%' }}
-                    mode="dropdown"
-                  >
-                    {cities.map((c) => (
-                      <Picker.Item key={c.key} label={c.label} value={c.key} color="#000" />
-                    ))}
-                  </Picker>
+                <Ionicons name={dropdownOpen ? 'chevron-up' : 'chevron-down'} size={22} color="#000" />
+              </TouchableOpacity>
+              {dropdownOpen && (
+                <View style={styles.filterDropdown}>
+                  {/* Name search */}
+                  <View style={styles.filterSection}>
+                    <Text style={styles.filterLabel}>{i18n.t('agentNamePlaceholder') || 'Agent Name'}</Text>
+                    <View style={styles.searchInputWrap}>
+                      <Ionicons name="search" size={20} color="#888" style={{ marginRight: 8 }} />
+                      <TextInput
+                        style={styles.pillInput}
+                        placeholder={i18n.t('agentNamePlaceholder')}
+                        value={search}
+                        onChangeText={setSearch}
+                        placeholderTextColor="#888"
+                        returnKeyType="search"
+                        onSubmitEditing={handleSearch}
+                      />
+                    </View>
+                  </View>
+                  {/* City filter */}
+                  <View style={styles.filterSection}>
+                    <Text style={styles.filterLabel}>{i18n.t('city') || 'City'}</Text>
+                    <View style={styles.pickerContainer}>
+                      <Picker
+                        selectedValue={city}
+                        onValueChange={setCity}
+                        style={{ color: '#000', fontSize: 16 }}
+                        mode="dropdown"
+                      >
+                        {cities.map((c) => (
+                          <Picker.Item key={c.key} label={c.label} value={c.key} color="#000" />
+                        ))}
+                      </Picker>
+                    </View>
+                  </View>
+                  {/* Favourites toggle */}
+                  <View style={styles.filterSection}>
+                    <TouchableOpacity
+                      style={styles.favoriteToggle}
+                      onPress={() => setShowFavoritesOnly(prev => !prev)}
+                      activeOpacity={0.7}
+                    >
+                      <Animated.Text style={{ fontSize: 28, color: showFavoritesOnly ? '#ffd700' : '#aaa', marginRight: 8, transform: [{ scale: showFavoritesOnly ? 1.2 : 1 }] }}>
+                        ★
+                      </Animated.Text>
+                      <Text style={styles.favoriteToggleText}>{i18n.t('showFavoritesOnly') || 'Show Favourites Only'}</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {/* Search/Clear buttons */}
+                  <View style={styles.filterActions}>
+                    <TouchableOpacity 
+                      style={[styles.searchBtn, styles.searchBtnPrimary]} 
+                      onPress={() => { setDropdownOpen(false); handleSearch(); }}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="search" size={18} color="#fff" style={{ marginRight: 6 }} />
+                      <Text style={styles.searchBtnText}>{i18n.t('search')}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.searchBtn, styles.searchBtnSecondary]}
+                      onPress={() => { handleClearFilters(); setDropdownOpen(false); }}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="close-circle" size={18} color="#fff" style={{ marginRight: 6 }} />
+                      <Text style={styles.searchBtnText}>{i18n.t('clearFilters') || 'Clear Filters'}</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-                {/* Favourites toggle */}
-                <TouchableOpacity
-                  style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}
-                  onPress={() => setShowFavoritesOnly(prev => !prev)}
-                >
-                  <Animated.Text style={{ fontSize: 28, color: showFavoritesOnly ? '#ffd700' : '#aaa', marginRight: 8, transform: [{ scale: showFavoritesOnly ? 1.2 : 1 }] }}>
-                    ★
-                  </Animated.Text>
-                  <Text style={{ fontSize: 16 }}>{i18n.t('showFavoritesOnly') || 'Show Favourites Only'}</Text>
-                </TouchableOpacity>
-                {/* Search/Clear buttons */}
-                <TouchableOpacity style={[styles.searchBtn, { marginTop: 8 }]} onPress={() => { setDropdownOpen(false); handleSearch(); }}>
-                  <Text style={styles.searchBtnText}>{i18n.t('search')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.searchBtn, { marginTop: 16, backgroundColor: '#e74c3c' }]}
-                  onPress={() => { handleClearFilters(); setDropdownOpen(false); }}>
-                  <Text style={styles.searchBtnText}>{i18n.t('clearFilters') || 'Clear Filters'}</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+              )}
             </View>
           </View>
         }
@@ -250,7 +271,7 @@ export default function AgentSearchScreen() {
               {modalAgent.profilePic ? (
                 <Image source={{ uri: modalAgent.profilePic }} style={{ width: 80, height: 80, borderRadius: 40, marginBottom: 12, backgroundColor: '#eee', borderWidth: 1, borderColor: '#fff' }} />
               ) : (
-                <Ionicons name="person-circle-outline" size={80} color="#007aff" style={{ marginBottom: 12 }} />
+                <Ionicons name="person-circle-outline" size={80} color="#fff" style={{ marginBottom: 12 }} />
               )}
               <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#fff', marginBottom: 4 }}>{modalAgent.name}</Text>
               <Text style={{ fontSize: 16, color: '#fff', marginBottom: 8 }}>{cityLabels[modalAgent.city] || modalAgent.city}</Text>
@@ -305,7 +326,7 @@ export default function AgentSearchScreen() {
               {item.profilePic ? (
                 <Image source={{ uri: item.profilePic }} style={{ width: 54, height: 54, borderRadius: 27, marginRight: 14, backgroundColor: '#eee', borderWidth: 1, borderColor: '#fff' }} />
               ) : (
-                <Ionicons name="person-circle-outline" size={54} color="#007aff" style={{ marginRight: 14 }} />
+                <Ionicons name="person-circle-outline" size={54} color="#fff" style={{ marginRight: 14 }} />
               )}
               <View>
                 <Text style={styles.cardTitle}>{item.name}</Text>
@@ -329,7 +350,7 @@ export default function AgentSearchScreen() {
             </View>
           )
         }
-        contentContainerStyle={{ flexGrow: 1, paddingBottom: 40, backgroundColor: '#000' }}
+        contentContainerStyle={{ flexGrow: 1, paddingBottom: 40, backgroundColor: '#000', paddingTop: 8, paddingHorizontal: 0 }}
         style={{ marginTop: 0 }}
       />
       {/* Fixed Forsa Logo */}
@@ -436,13 +457,70 @@ const styles = StyleSheet.create({
     alignSelf: 'center', // ensure lines are centered
   },
   filtersContainer: {
-    width: '100%',
     backgroundColor: '#fff',
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    marginBottom: 0,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    marginHorizontal: 16,
+    marginTop: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+    alignSelf: 'stretch',
+  },
+  filterHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  filterHeaderText: {
+    fontWeight: 'bold',
+    fontSize: 18,
+    color: '#000',
+  },
+  filterDropdown: {
+    backgroundColor: '#f8f8f8',
+    borderRadius: 16,
+    marginTop: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    width: '100%',
+  },
+  filterSection: {
+    marginBottom: 16,
+  },
+  filterLabel: {
+    fontWeight: '600',
+    fontSize: 15,
+    color: '#333',
+    marginBottom: 10,
+  },
+  pickerContainer: {
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    overflow: 'hidden',
+  },
+  favoriteToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  favoriteToggleText: {
+    fontSize: 15,
+    color: '#333',
+    fontWeight: '500',
+  },
+  filterActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
   },
   filterRowSingle: {
     flexDirection: 'row',
@@ -451,7 +529,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   searchInputWrap: {
-    flex: 2,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f4f4f4',
@@ -460,7 +537,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     marginRight: 0,
     marginBottom: 8,
-    minWidth: 120,
+    width: '100%',
   },
   pillInput: {
     flex: 1,
@@ -477,17 +554,24 @@ const styles = StyleSheet.create({
     textAlign: 'left',
   },
   searchBtn: {
-    backgroundColor: '#000', // Changed from blue to black
-    borderRadius: 28,
+    borderRadius: 12,
     paddingVertical: 12,
-    paddingHorizontal: 18,
+    paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 80,
-    marginLeft: 0,
-    marginBottom: 8,
+    flex: 1,
     flexDirection: 'row',
-    gap: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  searchBtnPrimary: {
+    backgroundColor: '#000',
+  },
+  searchBtnSecondary: {
+    backgroundColor: '#e74c3c',
   },
   searchBtnText: {
     color: '#fff',

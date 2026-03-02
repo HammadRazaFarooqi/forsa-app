@@ -22,7 +22,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
-import { uploadImageToStorage } from '../lib/firebaseHelpers';
+import { uploadMedia } from '../services/MediaService';
 import { writeEmailIndex } from '../lib/emailIndex';
 import {
   validateCity,
@@ -175,10 +175,16 @@ const SignupAgent = () => {
       const uid = user.uid;
       // console.log('[Signup] Firebase user created! UID:', uid);
 
-      // Step 2: Upload profile photo
+      // Step 2: Upload profile photo to Cloudinary
       let profilePhotoUrl = '';
       if (profilePhoto) {
-        profilePhotoUrl = await uploadImageToStorage(profilePhoto, `users/${uid}/profile.jpg`);
+        try {
+          const cloudinaryResponse = await uploadMedia(profilePhoto, 'image');
+          profilePhotoUrl = cloudinaryResponse.secure_url;
+        } catch (error: any) {
+          console.error('Error uploading profile photo:', error);
+          throw new Error('Failed to upload profile photo. Please try again.');
+        }
       }
 
       // Step 3: Save user data to Firestore

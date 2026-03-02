@@ -3,12 +3,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { getApp } from 'firebase/app';
 import { doc, getDoc, getFirestore, updateDoc } from 'firebase/firestore';
-import { auth } from '../lib/firebase';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
+import { auth } from '../lib/firebase';
+import { uploadMedia } from '../services/MediaService';
+import * as ImagePicker from 'expo-image-picker';
 
 const AGE_GROUPS = Array.from({ length: 11 }, (_, i) => (7 + i).toString());
 
@@ -42,6 +44,7 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
   const [settingAge, setSettingAge] = useState<string | null>(null);
   const { openMenu } = useHamburgerMenu();
   const [profilePic, setProfilePic] = useState<string | null>(null);
+  const [profilePicUrl, setProfilePicUrl] = useState<string | null>(null);
   const [address, setAddress] = useState('');
   const [editingAddress, setEditingAddress] = useState(false);
   const [contactPerson, setContactPerson] = useState('');
@@ -83,7 +86,10 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
             setSelected(Object.keys(feesOrPrices));
           }
           if (data && data.schedule) setSchedule(data.schedule);
-          if (data && data.profilePic) setProfilePic(data.profilePic);
+          if (data && data.profilePic) {
+            setProfilePic(data.profilePic);
+            setProfilePicUrl(data.profilePic);
+          }
           if (data && data.address) setAddress(data.address);
           if (data && data.contactPerson) setContactPerson(data.contactPerson);
         }
@@ -94,7 +100,7 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
       }
     }
     fetchPrices();
-  }, [academyName]);
+  }, []);
 
   const handleSetAge = (age: string) => {
     setSettingAge(age);
@@ -112,27 +118,97 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
     setPrices({ ...prices, [age]: value });
   };
 
+  const handlePickPhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      setProfilePic(result.assets[0].uri);
+    }
+  };
+
   const handleSave = async () => {
-    const uid = auth.currentUser?.uid;
-    const docId = uid || academyName || 'DefaultAcademy';
-    if (!uid && !academyName) return;
     setSaving(true);
+  
     try {
-      const db = getFirestore(getApp());
-      const academyRef = doc(db, 'academies', docId);
+      const user = auth.currentUser;
+      const uid = user?.uid;
+      const docId = uid || academyName || 'DefaultAcademy';
+  
+      if (!uid && !academyName) {
+        Alert.alert(i18n.t('error') || 'Error', 'User not authenticated');
+        setSaving(false);
+        return;
+      }
+  
+      let finalProfilePicUrl = profilePicUrl;
+  
+      // Upload profile photo if it's a new local image
+      if (
+        profilePic &&
+        profilePic !== profilePicUrl &&
+        (profilePic.startsWith('file://') ||
+          profilePic.startsWith('content://'))
+      ) {
+        try {
+          const cloudinaryResponse = await uploadMedia(profilePic, 'image');
+          finalProfilePicUrl = cloudinaryResponse.secure_url;
+          setProfilePicUrl(finalProfilePicUrl);
+        } catch (error) {
+          console.error('Error uploading profile photo:', error);
+          Alert.alert(i18n.t('error') || 'Error', 'Failed to upload profile photo');
+          setSaving(false);
+          return;
+        }
+      }
+  
+      const dbInstance = getFirestore(getApp());
+      const academyRef = doc(dbInstance, 'academies', docId);
+  
+      // Convert prices to numeric where possible
       const feesObj: { [key: string]: string | number } = {};
-      Object.entries(prices).forEach(([k, v]) => { if (v) feesObj[k] = isNaN(Number(v)) ? v : Number(v); });
-      await updateDoc(academyRef, {
+      Object.entries(prices).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') {
+          feesObj[k] = isNaN(Number(v)) ? v : Number(v);
+        }
+      });
+  
+      const updateData: any = {
         prices: feesObj,
         fees: feesObj,
-        schedule: schedule,
+        schedule,
         address: address || null,
         contactPerson: contactPerson || null,
         updatedAt: new Date().toISOString(),
-      });
-      if (router.canGoBack()) router.back();
-    } catch (e: any) {
-      console.error('Academy profile save error:', e);
+      };
+  
+      if (finalProfilePicUrl) {
+        updateData.profilePic = finalProfilePicUrl;
+      }
+  
+      // Update academies collection
+      await updateDoc(academyRef, updateData);
+  
+      // Also update users collection if UID exists
+      if (uid) {
+        const userRef = doc(dbInstance, 'users', uid);
+        await updateDoc(userRef, updateData);
+      }
+  
+      Alert.alert(
+        i18n.t('success') || 'Success',
+        i18n.t('profileUpdated') || 'Profile updated successfully'
+      );
+  
+      if (router.canGoBack()) {
+        router.back();
+      }
+    } catch (error) {
+      console.error('Error updating academy profile:', error);
+      Alert.alert(i18n.t('error') || 'Error', 'Failed to update profile');
     } finally {
       setSaving(false);
     }
@@ -180,12 +256,10 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
             <View style={styles.formCard}>
               {/* Profile Picture */}
               <View style={styles.profileSection}>
-                <TouchableOpacity onPress={() => {/* TODO: open image picker */}} style={styles.profileImageContainer}>
+                <TouchableOpacity onPress={handlePickPhoto} style={styles.profileImageContainer}>
                   {profilePic ? (
-                    <View style={styles.profileImageWrapper}>
-                      <Ionicons name="image" size={48} color="#fff" />
-          </View>
-        ) : (
+                    <Image source={{ uri: profilePic }} style={styles.profileImage} />
+                  ) : (
                     <View style={styles.profileImagePlaceholder}>
                       <Ionicons name="camera" size={32} color="#999" />
                     </View>
@@ -194,7 +268,7 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
                     <Ionicons name="camera" size={16} color="#fff" />
             </View>
           </TouchableOpacity>
-        <TouchableOpacity onPress={() => {/* TODO: open image picker */}}>
+        <TouchableOpacity onPress={handlePickPhoto}>
                   <Text style={styles.changeProfileText}>{i18n.t('changeProfilePicture')}</Text>
         </TouchableOpacity>
       </View>
@@ -315,81 +389,8 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
       </View>
               </View>
 
-              {/* Schedule (day + time) per age group - theme-aligned, responsive */}
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>{i18n.t('schedulePerAgeGroup') || 'Training schedule (day & time per age)'}</Text>
-                {AGE_GROUPS.map((age) => (
-                  <View
-                    key={age}
-                    style={[
-                      styles.scheduleRow,
-                      isNarrow && styles.scheduleRowNarrow,
-                      { position: 'relative', zIndex: scheduleDropdown?.age === age ? 10 : 1 },
-                    ]}
-                  >
-                    <Text style={styles.scheduleAgeLabel} numberOfLines={1}>{age} {i18n.t('years') || 'yrs'}</Text>
-                    <View style={styles.schedulePickersWrap}>
-                      <TouchableOpacity
-                        style={styles.schedulePickerBtn}
-                        onPress={() => setScheduleDropdown(prev => prev?.age === age && prev?.type === 'day' ? null : { age, type: 'day' })}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.schedulePickerText} numberOfLines={1}>
-                          {schedule[age]?.day ? (i18n.t(schedule[age].day) || schedule[age].day) : (i18n.t('day') || 'Day')}
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.schedulePickerBtn}
-                        onPress={() => setScheduleDropdown(prev => prev?.age === age && prev?.type === 'time' ? null : { age, type: 'time' })}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.schedulePickerText} numberOfLines={1}>
-                          {schedule[age]?.time ? formatTime12Hour(schedule[age].time) : (i18n.t('time') || 'Time')}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                    {scheduleDropdown?.age === age && (
-                      <View style={[styles.scheduleDropdown, { maxWidth: screenWidth - 48 }, isNarrow && styles.scheduleDropdownNarrow]}>
-                        <ScrollView style={styles.scheduleDropdownScroll} showsVerticalScrollIndicator={true}>
-                          {scheduleDropdown.type === 'day'
-                            ? DAYS_OF_WEEK.map((day) => (
-                                <TouchableOpacity
-                                  key={day}
-                                  onPress={() => {
-                                    setSchedule(s => ({ ...s, [age]: { ...(s[age] || { day: '', time: '' }), day } }));
-                                    setScheduleDropdown(null);
-                                  }}
-                                  style={[styles.scheduleDropdownItem, schedule[age]?.day === day && styles.scheduleDropdownItemSelected]}
-                                  activeOpacity={0.7}
-                                >
-                                  <Text style={styles.scheduleDropdownItemText}>{i18n.t(day) || day}</Text>
-                                </TouchableOpacity>
-                              ))
-                            : TIME_OPTIONS.map((t) => (
-                                <TouchableOpacity
-                                  key={t}
-                                  onPress={() => {
-                                    setSchedule(s => ({ ...s, [age]: { ...(s[age] || { day: '', time: '' }), time: t } }));
-                                    setScheduleDropdown(null);
-                                  }}
-                                  style={[styles.scheduleDropdownItem, schedule[age]?.time === t && styles.scheduleDropdownItemSelected]}
-                                  activeOpacity={0.7}
-                                >
-                                  <Text style={styles.scheduleDropdownItemText}>{t}</Text>
-                                </TouchableOpacity>
-                              ))}
-                        </ScrollView>
-                        <TouchableOpacity onPress={() => setScheduleDropdown(null)} style={styles.scheduleDropdownCancel} activeOpacity={0.8}>
-                          <Text style={styles.scheduleDropdownCancelText}>{i18n.t('cancel') || 'Cancel'}</Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                  </View>
-                ))}
-              </View>
-
-              <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving} activeOpacity={0.8}>
-                <Text style={styles.saveButtonText}>{saving ? (i18n.t('saving') || 'Saving...') : (i18n.t('save') || 'Save')}</Text>
+              <TouchableOpacity style={styles.saveButton} activeOpacity={0.8}>
+                <Text style={styles.saveButtonText}>{i18n.t('save') || 'Save'}</Text>
       </TouchableOpacity>
             </View>
     </ScrollView>
@@ -461,13 +462,10 @@ const styles = StyleSheet.create({
     position: 'relative',
     marginBottom: 12,
   },
-  profileImageWrapper: {
+  profileImage: {
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
     borderWidth: 4,
     borderColor: '#fff',
   },

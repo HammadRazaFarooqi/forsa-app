@@ -3,22 +3,33 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { collection, onSnapshot, getFirestore, orderBy, query, where } from 'firebase/firestore';
 import React, { useState, useRef } from 'react';
-import { ActivityIndicator, Animated, Easing, FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, FlatList, Image, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import PostActionsMenu from '../components/PostActionsMenu';
 import i18n from '../locales/i18n';
+import { auth } from '../lib/firebase';
 
 const ClinicFeedScreen = () => {
   const router = useRouter();
   const { openMenu } = useHamburgerMenu();
   const [feed, setFeed] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fullScreenMedia, setFullScreenMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   React.useEffect(() => {
     setLoading(true);
+    
+    // Check if user is authenticated before setting up listener
+    const user = auth.currentUser;
+    if (!user) {
+      setFeed([]);
+      setLoading(false);
+      return;
+    }
+    
     const db = getFirestore();
     const postsRef = collection(db, 'posts');
     
@@ -34,6 +45,13 @@ const ClinicFeedScreen = () => {
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
+        // Check authentication before processing
+        if (!auth.currentUser) {
+          setFeed([]);
+          setLoading(false);
+          return;
+        }
+        
         const posts = querySnapshot.docs.map(doc => ({ 
           id: doc.id, 
           ...doc.data() 
@@ -42,6 +60,21 @@ const ClinicFeedScreen = () => {
         setLoading(false);
       },
       (error) => {
+        // Check if user is still authenticated before attempting fallback
+        if (!auth.currentUser) {
+          setFeed([]);
+          setLoading(false);
+          return;
+        }
+        
+        // Check if error is due to permissions (user logged out)
+        if (error.code === 'permission-denied' || error.message?.includes('permission')) {
+          // Silently handle permission errors (user likely logged out)
+          setFeed([]);
+          setLoading(false);
+          return;
+        }
+        
         console.error('Clinic feed listener error:', error);
         // Fallback: try querying without status filter for backward compatibility
         const fallbackQ = query(
@@ -49,9 +82,19 @@ const ClinicFeedScreen = () => {
           where('visibleToRoles', 'array-contains', 'clinic'),
           orderBy('timestamp', 'desc')
         );
-        onSnapshot(
+        
+        let fallbackUnsubscribe: (() => void) | null = null;
+        fallbackUnsubscribe = onSnapshot(
           fallbackQ,
           (snapshot) => {
+            // Check authentication again before processing
+            if (!auth.currentUser) {
+              if (fallbackUnsubscribe) fallbackUnsubscribe();
+              setFeed([]);
+              setLoading(false);
+              return;
+            }
+            
             const posts = snapshot.docs
               .map(doc => ({ id: doc.id, ...doc.data() }))
               .filter((post: any) => !post.status || post.status === 'active');
@@ -59,6 +102,13 @@ const ClinicFeedScreen = () => {
             setLoading(false);
           },
           (fallbackError) => {
+            // Check if error is due to permissions
+            if (fallbackError.code === 'permission-denied' || fallbackError.message?.includes('permission')) {
+              // Silently handle permission errors
+              setFeed([]);
+              setLoading(false);
+              return;
+            }
             console.error('Clinic feed fallback error:', fallbackError);
             setFeed([]);
             setLoading(false);
@@ -68,7 +118,9 @@ const ClinicFeedScreen = () => {
     );
 
     // Cleanup listener on unmount
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const renderFeedItem = ({ item }: any) => {
@@ -121,6 +173,13 @@ const ClinicFeedScreen = () => {
                 resizeMode="cover"
               />
             )}
+            <TouchableOpacity
+              style={styles.fullScreenButton}
+              onPress={() => setFullScreenMedia({ uri: item.mediaUrl, type: item.mediaType === 'video' ? 'video' : 'image' })}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="expand" size={24} color="#fff" />
+            </TouchableOpacity>
           </View>
         )}
         
@@ -171,6 +230,44 @@ const ClinicFeedScreen = () => {
           )}
         </Animated.View>
       </LinearGradient>
+
+      {/* Full Screen Media Viewer */}
+      <Modal
+        visible={!!fullScreenMedia}
+        transparent={false}
+        animationType="fade"
+        onRequestClose={() => setFullScreenMedia(null)}
+        statusBarTranslucent={true}
+      >
+        <View style={styles.fullScreenContainer}>
+          <TouchableOpacity
+            style={styles.fullScreenCloseButton}
+            onPress={() => setFullScreenMedia(null)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="close" size={32} color="#fff" />
+          </TouchableOpacity>
+          {fullScreenMedia && (
+            <View style={styles.fullScreenContent}>
+              {fullScreenMedia.type === 'video' ? (
+                <Video
+                  source={{ uri: fullScreenMedia.uri }}
+                  style={styles.fullScreenVideo}
+                  useNativeControls
+                  resizeMode={ResizeMode.CONTAIN}
+                  isLooping={false}
+                />
+              ) : (
+                <Image
+                  source={{ uri: fullScreenMedia.uri }}
+                  style={styles.fullScreenImage}
+                  resizeMode="contain"
+                />
+              )}
+            </View>
+          )}
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 };
@@ -309,6 +406,52 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
     paddingHorizontal: 40,
+  },
+  fullScreenButton: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 20,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  fullScreenContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+    height: '100%',
+  },
+  fullScreenCloseButton: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 40,
+    right: 20,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenContent: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenImage: {
+    width: '100%',
+    height: '100%',
+  },
+  fullScreenVideo: {
+    width: '100%',
+    height: '100%',
   },
 });
 
