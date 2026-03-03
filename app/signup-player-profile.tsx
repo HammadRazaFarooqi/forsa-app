@@ -25,6 +25,7 @@ import {
 import { uploadMedia } from '../services/MediaService';
 import { auth, db } from '../lib/firebase';
 import { writeEmailIndex } from '../lib/emailIndex';
+import { writePhoneIndex } from '../lib/phoneIndex';
 import {
   validateCity,
   validateEmail,
@@ -330,6 +331,7 @@ const SignupPlayer = () => {
       if (email && email.trim().length > 0) {
         await writeEmailIndex(email.trim(), authEmail);
       }
+      await writePhoneIndex(phoneForAuth, authEmail);
       // console.log('[Signup] Firestore saved! User is logged in and navigating to player-feed...');
 
       // Step 4: Generate check-in code (non-blocking)

@@ -6,6 +6,7 @@ import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { writeEmailIndex } from '../lib/emailIndex';
+import { writePhoneIndex } from '../lib/phoneIndex';
 import { normalizePhoneForAuth } from '../lib/validations';
 import React, { useState } from 'react';
 import {
@@ -228,10 +229,12 @@ const SignupAcademy = () => {
       await setDoc(doc(db, 'users', uid), userData, { merge: true });
       await setDoc(doc(db, 'academies', uid), userData);
 
-      // Save email → authEmail mapping
+      // Save email → authEmail mapping for sign-in by email
       if (email && email.trim().length > 0) {
         await writeEmailIndex(email.trim(), authEmail);
       }
+      // Save phone → authEmail mapping so sign-in by phone works (e.g. account created with email + phone)
+      await writePhoneIndex(phoneForAuth, authEmail);
 
       router.replace('/academy-feed');
     } catch (err: any) {

@@ -159,6 +159,7 @@ export default function HamburgerMenu() {
         { label: i18n.t('notifications') || 'Notifications', route: '/notifications', icon: 'notifications-outline' },
         { label: 'My QR Code', route: '/my-qr-code', icon: 'qr-code-outline' },
         { label: i18n.t('uploadMedia') || 'Upload Media', route: '/player-upload-media', icon: 'cloud-upload-outline' },
+        { label: i18n.t('myMedia') || 'My Media', route: '/player-my-media', icon: 'images-outline' },
         { label: i18n.t('messages') || 'Messages', route: '/player-messages', icon: 'chatbubbles-outline' },
         { label: i18n.t('myBookings') || 'My Bookings', route: '/player-bookings', icon: 'calendar-outline' },
         { label: i18n.t('searchAcademies') || 'Search Academies', route: '/academy-search', icon: 'school-outline' },

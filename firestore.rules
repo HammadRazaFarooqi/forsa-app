@@ -304,6 +304,23 @@ service cloud.firestore {
     }
 
     // =========================
+    // 8) /emailIndex, /phoneIndex - Login lookup (public read for sign-in)
+    // Maps email/phone to Firebase Auth identity so sign-in can resolve before auth.
+    // =========================
+    match /emailIndex/{docId} {
+      allow get, read: if true;
+      allow list: if false;
+      allow create: if isAuthed();
+      allow update, delete: if isAdmin();
+    }
+    match /phoneIndex/{docId} {
+      allow get, read: if true;
+      allow list: if false;
+      allow create: if isAuthed();
+      allow update, delete: if isAdmin();
+    }
+
+    // =========================
     // Default deny (NO public access)
     // =========================
     match /{document=**} {

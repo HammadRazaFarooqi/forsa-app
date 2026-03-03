@@ -22,6 +22,7 @@ import {
 } from 'react-native';
 import { auth, db } from '../lib/firebase';
 import { writeEmailIndex } from '../lib/emailIndex';
+import { writePhoneIndex } from '../lib/phoneIndex';
 import {
   validateCity,
   validateEmail,
@@ -191,6 +192,7 @@ const SignupParent = () => {
       if (userEmailForIndex) {
         await writeEmailIndex(userEmailForIndex, authEmail);
       }
+      await writePhoneIndex(phoneForAuth, authEmail);
 
       // Step 3: Generate check-in code (non-blocking)
       try {

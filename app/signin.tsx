@@ -21,6 +21,7 @@ import {
 import { auth, db } from "../lib/firebase";
 import { normalizePhoneForAuth, normalizePhoneForTwilio } from "../lib/validations";
 import { lookupEmailIndex } from "../lib/emailIndex";
+import { lookupPhoneIndex } from "../lib/phoneIndex";
 import i18n from "../locales/i18n";
 import { useAuth } from "../context/AuthContext";
 
@@ -119,7 +120,22 @@ const SignInScreen = () => {
         }
       }
 
-      // If all phone formats fail, try email mapping lookup
+      // If all phone formats fail, try phone → authEmail lookup (e.g. account created with email + phone)
+      if (!userCredential && !isEmail) {
+        const indexedAuthEmail = await lookupPhoneIndex(digits);
+        if (indexedAuthEmail) {
+          console.log("🔗 Found phone mapping! Attempting login with:", indexedAuthEmail);
+          try {
+            userCredential = await signInWithEmailAndPassword(auth, indexedAuthEmail, password);
+            authEmail = indexedAuthEmail;
+            lastError = null;
+          } catch (error: any) {
+            lastError = error;
+          }
+        }
+      }
+
+      // If still no luck and input was email, try email mapping lookup
       if (!userCredential && isEmail) {
         const indexedAuthEmail = await lookupEmailIndex(emailOrPhone);
         if (indexedAuthEmail) {

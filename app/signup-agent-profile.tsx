@@ -24,6 +24,7 @@ import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { uploadMedia } from '../services/MediaService';
 import { writeEmailIndex } from '../lib/emailIndex';
+import { writePhoneIndex } from '../lib/phoneIndex';
 import {
   validateCity,
   validateEmail,
@@ -209,6 +210,7 @@ const SignupAgent = () => {
       if (userEmailForIndex) {
         await writeEmailIndex(userEmailForIndex, authEmail);
       }
+      await writePhoneIndex(phoneForAuth, authEmail);
 
       // Step 4: User is already signed in, redirect to dashboard
       // console.log('[Signup] User is logged in and navigating to agent-feed...');

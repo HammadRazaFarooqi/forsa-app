@@ -334,18 +334,24 @@ export default function ParentAcademyDetailsScreen() {
             </Modal>
 
             <TouchableOpacity
-              style={[styles.reserveButton, !selectedAge && styles.reserveButtonDisabled]}
+              style={[styles.reserveButton, (!selectedAge || bookingLoading) && styles.reserveButtonDisabled]}
               onPress={handleReserve}
               activeOpacity={0.8}
-              disabled={!selectedAge}
+              disabled={!selectedAge || bookingLoading}
             >
-              <Ionicons name="calendar" size={20} color="#fff" style={styles.reserveIcon} />
-              <Text style={styles.reserveButtonText}>
-                {selectedAge
-                  ? `${i18n.t('reserveNow') || 'Reserve Now'} - ${selectedPrice} EGP`
-                  : i18n.t('selectAgeToBook') || 'Select Age to Book'
-                }
-              </Text>
+              {bookingLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="calendar" size={20} color="#fff" style={styles.reserveIcon} />
+                  <Text style={styles.reserveButtonText}>
+                    {selectedAge
+                      ? `${i18n.t('reserveNow') || 'Reserve Now'} - ${selectedPrice} EGP`
+                      : i18n.t('selectAgeToBook') || 'Select Age to Book'
+                    }
+                  </Text>
+                </>
+              )}
             </TouchableOpacity>
           </ScrollView>
         </Animated.View>

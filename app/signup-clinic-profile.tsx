@@ -6,6 +6,7 @@ import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { writeEmailIndex } from '../lib/emailIndex';
+import { writePhoneIndex } from '../lib/phoneIndex';
 import { normalizePhoneForAuth } from '../lib/validations';
 import React, { useRef, useState } from 'react';
 import {
@@ -276,6 +277,7 @@ const SignupClinic = () => {
       if (email && email.trim().length > 0) {
         await writeEmailIndex(email.trim(), authEmail);
       }
+      await writePhoneIndex(phoneForAuth, authEmail);
 
       router.replace('/clinic-feed');
     } catch (err: any) {

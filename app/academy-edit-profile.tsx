@@ -1,14 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { getApp } from 'firebase/app';
-import { doc, getDoc, getFirestore, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
-import { auth } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
 import { uploadMedia } from '../services/MediaService';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -35,9 +34,12 @@ function formatTime12Hour(time24: string): string {
   return `${hours12}:${minutes.toString().padStart(2, '0')} ${period}`;
 }
 
-export default function AcademyEditProfileScreen({ academyName }: { academyName?: string }) {
+export default function AcademyEditProfileScreen({ academyName: academyNameProp }: { academyName?: string }) {
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [academyName, setAcademyName] = useState(academyNameProp || '');
+  const [city, setCity] = useState('');
+  const [description, setDescription] = useState('');
   const [prices, setPrices] = useState<{ [key: string]: string }>({});
   const [selected, setSelected] = useState<string[]>([]);
   const [newPrice, setNewPrice] = useState('');
@@ -67,39 +69,43 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
   }, []);
 
   useEffect(() => {
-    async function fetchPrices() {
+    async function fetchProfile() {
       setLoading(true);
       setFetchError(null);
       try {
-        const app = getApp();
-        const db = getFirestore(app);
         const uid = auth.currentUser?.uid;
-        const name = academyName || 'DefaultAcademy';
-        const docId = uid || name;
-        const docRef = doc(db, 'academies', docId);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          const feesOrPrices = data.fees || data.prices || {};
-          if (data && (data.prices || data.fees)) {
-            setPrices(feesOrPrices);
-            setSelected(Object.keys(feesOrPrices));
-          }
-          if (data && data.schedule) setSchedule(data.schedule);
-          if (data && data.profilePic) {
-            setProfilePic(data.profilePic);
-            setProfilePicUrl(data.profilePic);
-          }
-          if (data && data.address) setAddress(data.address);
-          if (data && data.contactPerson) setContactPerson(data.contactPerson);
+        if (!uid) {
+          setFetchError(i18n.t('couldNotLoadData') || 'Not signed in.');
+          return;
         }
+        const docRef = doc(db, 'academies', uid);
+        const docSnap = await getDoc(docRef);
+        if (!docSnap.exists()) {
+          setFetchError(i18n.t('couldNotLoadData') || 'Academy profile not found.');
+          return;
+        }
+        const data = docSnap.data();
+        const feesOrPrices = data.fees || data.prices || {};
+        setPrices(feesOrPrices);
+        setSelected(Object.keys(feesOrPrices).length ? Object.keys(feesOrPrices) : []);
+        if (data.schedule) setSchedule(data.schedule);
+        const photoUrl = data.profilePhoto || data.profilePic;
+        if (photoUrl) {
+          setProfilePic(photoUrl);
+          setProfilePicUrl(photoUrl);
+        }
+        if (data.academyName) setAcademyName(data.academyName);
+        if (data.address) setAddress(data.address);
+        if (data.city) setCity(data.city);
+        if (data.description) setDescription(data.description);
+        if (data.contactPerson) setContactPerson(data.contactPerson);
       } catch (e: any) {
-        setFetchError(i18n.t('couldNotLoadData') || 'Could not load academy data.');
+        setFetchError(e?.message || i18n.t('couldNotLoadData') || 'Could not load academy data.');
       } finally {
         setLoading(false);
       }
     }
-    fetchPrices();
+    fetchProfile();
   }, []);
 
   const handleSetAge = (age: string) => {
@@ -131,18 +137,13 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
   };
 
   const handleSave = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      Alert.alert(i18n.t('error') || 'Error', 'User not authenticated');
+      return;
+    }
     setSaving(true);
-  
     try {
-      const user = auth.currentUser;
-      const uid = user?.uid;
-      const docId = uid || academyName || 'DefaultAcademy';
-  
-      if (!uid && !academyName) {
-        Alert.alert(i18n.t('error') || 'Error', 'User not authenticated');
-        setSaving(false);
-        return;
-      }
   
       let finalProfilePicUrl = profilePicUrl;
   
@@ -165,38 +166,34 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
         }
       }
   
-      const dbInstance = getFirestore(getApp());
-      const academyRef = doc(dbInstance, 'academies', docId);
-  
-      // Convert prices to numeric where possible
+      const academyRef = doc(db, 'academies', uid);
+
       const feesObj: { [key: string]: string | number } = {};
       Object.entries(prices).forEach(([k, v]) => {
         if (v !== undefined && v !== null && v !== '') {
           feesObj[k] = isNaN(Number(v)) ? v : Number(v);
         }
       });
-  
+
       const updateData: any = {
-        prices: feesObj,
         fees: feesObj,
         schedule,
         address: address || null,
         contactPerson: contactPerson || null,
+        academyName: academyName || null,
+        city: city || null,
+        description: description || null,
         updatedAt: new Date().toISOString(),
       };
-  
       if (finalProfilePicUrl) {
+        updateData.profilePhoto = finalProfilePicUrl;
         updateData.profilePic = finalProfilePicUrl;
       }
-  
-      // Update academies collection
+
       await updateDoc(academyRef, updateData);
-  
-      // Also update users collection if UID exists
-      if (uid) {
-        const userRef = doc(dbInstance, 'users', uid);
-        await updateDoc(userRef, updateData);
-      }
+
+      const userRef = doc(db, 'users', uid);
+      await updateDoc(userRef, updateData);
   
       Alert.alert(
         i18n.t('success') || 'Success',
@@ -273,14 +270,51 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
         </TouchableOpacity>
       </View>
 
-              {/* Academy Name (read-only) */}
+              {/* Academy Name (editable) */}
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>{i18n.t('academyNameLabel')}</Text>
-                <View style={[styles.inputWrapper, styles.readOnlyInput]}>
+                <View style={styles.inputWrapper}>
                   <Ionicons name="school-outline" size={20} color="#999" style={styles.inputIcon} />
-                  <Text style={styles.readOnlyText}>{academyName || i18n.t('academyNameLabel')}</Text>
-        </View>
-      </View>
+                  <TextInput
+                    style={styles.input}
+                    value={academyName}
+                    onChangeText={setAcademyName}
+                    placeholder={i18n.t('academy_name_placeholder') || 'Academy name'}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+              </View>
+
+              {/* City */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>{i18n.t('city') || 'City'}</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="location-outline" size={20} color="#999" style={styles.inputIcon} />
+                  <TextInput
+                    style={styles.input}
+                    value={city}
+                    onChangeText={setCity}
+                    placeholder={i18n.t('city') || 'City'}
+                    placeholderTextColor="#999"
+                  />
+                </View>
+              </View>
+
+              {/* Description */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>{i18n.t('description') || 'Description'}</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="document-text-outline" size={20} color="#999" style={styles.inputIcon} />
+                  <TextInput
+                    style={[styles.input, { minHeight: 72 }]}
+                    value={description}
+                    onChangeText={setDescription}
+                    placeholder={i18n.t('description') || 'Description'}
+                    placeholderTextColor="#999"
+                    multiline
+                  />
+                </View>
+              </View>
 
               {/* Address */}
               <View style={styles.inputGroup}>
@@ -389,9 +423,18 @@ export default function AcademyEditProfileScreen({ academyName }: { academyName?
       </View>
               </View>
 
-              <TouchableOpacity style={styles.saveButton} activeOpacity={0.8}>
-                <Text style={styles.saveButtonText}>{i18n.t('save') || 'Save'}</Text>
-      </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+                onPress={handleSave}
+                disabled={saving}
+                activeOpacity={0.8}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>{i18n.t('save') || 'Save'}</Text>
+                )}
+              </TouchableOpacity>
             </View>
     </ScrollView>
         </Animated.View>
