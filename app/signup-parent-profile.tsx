@@ -56,7 +56,6 @@ const SignupParent = () => {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [city, setCity] = useState('');
   const [children, setChildren] = useState<string[]>(['']);
   const [childAges, setChildAges] = useState<string[]>(['']);
@@ -118,14 +117,6 @@ const SignupParent = () => {
     if (passwordError) {
       newErrors.password = passwordError;
       newMissing.password = true;
-    }
-
-    if (!confirmPassword) {
-      newErrors.confirmPassword = i18n.t('confirm_password_required') || 'Confirm password is required';
-      newMissing.confirmPassword = true;
-    } else if (password && confirmPassword && password !== confirmPassword) {
-      newErrors.confirmPassword = i18n.t('password_mismatch') || 'Passwords do not match';
-      newMissing.confirmPassword = true;
     }
 
     const cityError = validateCity(city);
@@ -385,25 +376,6 @@ const SignupParent = () => {
                   />
                 </View>
                 {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.label}>
-                  {i18n.t('confirm_password')}
-                  <Text style={styles.required}> *</Text>
-                </Text>
-                <View style={[styles.inputWrapper, missing.confirmPassword && styles.inputWrapperError]}>
-                  <Ionicons name="lock-closed-outline" size={20} color="#999" style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.input}
-                    value={confirmPassword}
-                    onChangeText={t => { setConfirmPassword(t); if (missing.confirmPassword) setMissing(m => ({ ...m, confirmPassword: false })); }}
-                    secureTextEntry
-                    placeholder={i18n.t('confirm_password_placeholder') || i18n.t('confirm_password_ph') || 'Confirm your password'}
-                    placeholderTextColor="#999"
-                  />
-                </View>
-                {errors.confirmPassword && <Text style={styles.errorText}>{errors.confirmPassword}</Text>}
               </View>
 
               <View style={styles.inputGroup}>

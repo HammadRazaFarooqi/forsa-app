@@ -1,863 +1,546 @@
-// Helper: format working hours object or string for display
-function formatWorkingHours(working_hours: any): string {
-  if (!working_hours) return '';
-  if (typeof working_hours === 'string') return working_hours;
-  if (typeof working_hours === 'object') {
-    // Format as "Mon: 9-5, Wed: 10-6" etc.
-    return Object.entries(working_hours)
-      .map(([day, hours]) => `${capitalize(day)}: ${hours}`)
-      .join(', ');
-  }
-  return '';
-}
-
-function capitalize(str: string) {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, FlatList, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import React, { useRef, useState, useEffect } from 'react';
+import { Animated, Easing, FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
+import { db } from '../lib/firebase';
+import { collection, getDocs, query } from 'firebase/firestore';
 
-const cities = [
-  'Cairo', 'Giza', 'Alexandria', 'Port Said', 'Suez', 'Luxor', 'Aswan', 'Mansoura', 'Tanta', 'Zagazig', 'Ismailia', 'Faiyum', 'Sohag', 'Damietta', 'Beni Suef', 'Minya', 'Assiut', 'Hurghada', 'Sharm El Sheikh', 'Marsa Matrouh', 'El Mahalla El Kubra', 'Banha', 'Kafr El Sheikh', 'Damanhur', 'Qena'
+const cities = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>).map(([key, label]) => ({ key, label }));
+const servicesList = [
+  { key: 'spa', label: i18n.t('spa') || 'Spa' },
+  { key: 'sauna', label: i18n.t('sauna') || 'Sauna' },
+  { key: 'physio', label: i18n.t('physio') || 'Physiotherapy' },
+  { key: 'ice_bath', label: i18n.t('ice_bath') || 'Ice Bath' },
+  { key: 'massage', label: i18n.t('massage') || 'Massage' },
+  { key: 'full_recovery', label: i18n.t('full_recovery') || 'Full Recovery' },
+  { key: 'nutrition', label: i18n.t('nutrition') || 'Nutrition' },
+  { key: 'rehab', label: i18n.t('rehab') || 'Rehabilitation' },
+  { key: 'stretching', label: i18n.t('stretching') || 'Stretching' },
+  { key: 'other', label: i18n.t('other') || 'Other' },
 ];
 
-// Helper: translate arbitrary text using LibreTranslate API
-async function translateText(text: string, sourceLang: string, targetLang: string): Promise<string> {
-  if (sourceLang === targetLang) return text;
-  try {
-    const res = await fetch('https://libretranslate.de/translate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: text, source: sourceLang, target: targetLang, format: 'text' })
-    });
-    const data = await res.json();
-    return data.translatedText || text;
-  } catch {
-    return text;
-  }
-}
-
-type Clinic = {
+interface Clinic {
   id: string;
+  clinicName: string;
   name: string;
   city: string;
-  description?: string;
-  [key: string]: any;
-};
-
-const ClinicCardSkeleton = () => {
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 0.7, duration: 800, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-      ])
-    ).start();
-  }, [pulseAnim]);
-
-  return (
-    <Animated.View style={[styles.card, styles.cardBlack, { maxWidth: 340, width: '95%', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', padding: 12, opacity: pulseAnim, marginBottom: 16 }]}>
-      <View style={{ width: 54, height: 54, borderRadius: 27, marginRight: 14, backgroundColor: '#333' }} />
-      <View style={{ flex: 1 }}>
-        <View style={{ height: 20, backgroundColor: '#333', borderRadius: 4, marginBottom: 6, width: '70%' }} />
-        <View style={{ height: 16, backgroundColor: '#333', borderRadius: 4, marginBottom: 8, width: '40%' }} />
-        <View style={{ height: 14, backgroundColor: '#333', borderRadius: 4, marginBottom: 4, width: '90%' }} />
-        <View style={{ height: 14, backgroundColor: '#333', borderRadius: 4, width: '80%' }} />
-      </View>
-    </Animated.View>
-  );
-};
+  address: string;
+  description: string;
+  services: string[];
+  minPrice: number;
+}
 
 export default function ClinicSearchScreen() {
   const { openMenu } = useHamburgerMenu();
-  const router = useRouter();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [search, setSearch] = useState('');
+  const [name, setName] = useState('');
   const [city, setCity] = useState('');
   const [cityModal, setCityModal] = useState(false);
-  const [results, setResults] = useState<Clinic[]>([]);
-  const [allClinics, setAllClinics] = useState<Clinic[]>([]);
-  const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [descTranslations, setDescTranslations] = useState<{
-    [key: string]: { desc?: string; address?: string }
-  }>({});
-  const lang = i18n.locale;
-  const [selectedServices, setSelectedServices] = useState<string[]>([]);
-  const [minPrice, setMinPrice] = useState('');
-  const [maxPrice, setMaxPrice] = useState('');
-  const [sortService, setSortService] = useState('spa');
-  const [minPrices, setMinPrices] = useState<Record<string, string>>({});
-  const [maxPrices, setMaxPrices] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(false);
-  // Dropdown and sort modal state (moved to top)
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [sortModalOpen, setSortModalOpen] = useState(false);
-  const [favorites, setFavorites] = useState<string[]>([]);
-  const favoriteAnims = useRef(new Map<string, Animated.Value>()).current;
-  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+  const [service, setService] = useState('');
+  const [serviceModal, setServiceModal] = useState(false);
+  const [price, setPrice] = useState('');
+  const [clinics, setClinics] = useState<Clinic[]>([]);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 600,
+      easing: Easing.out(Easing.exp),
+      useNativeDriver: true,
+    }).start();
 
-  // Fetch all clinics on mount
-  React.useEffect(() => {
-    const fetchAll = async () => {
-      setLoading(true);
-      try {
-        const clinicsRef = collection(db, 'clinics');
-        const querySnapshot = await getDocs(clinicsRef);
-        const clinics = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Clinic[];
-        setAllClinics(clinics);
-        setResults(clinics); // Show all clinics by default
-      } catch (err) {
-        console.error('❌ Failed to load all clinics:', err);
-        setAllClinics([]);
-        setResults([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchAll();
-    const loadFavorites = async () => {
-      try {
-        const storedFavorites = await AsyncStorage.getItem('clinicFavorites');
-        if (storedFavorites) {
-          setFavorites(JSON.parse(storedFavorites));
-        }
-      } catch (e) {
-        console.error("Failed to load favorites", e);
-      }
-    };
-    loadFavorites();
+    fetchClinics();
   }, []);
 
-  // Always translate to the current language, unless it's English
-  React.useEffect(() => {
-    if (lang === 'en') {
-      setDescTranslations({});
-      return;
-    }
-    const translateAll = async () => {
-      const translations: { [key: string]: { desc?: string; address?: string; doctors?: any[] } } = {};
-      for (const clinic of results) {
-        const desc = clinic.description || '';
-        const addr = clinic.address || '';
-        let translatedDesc = desc;
-        let translatedAddr = addr;
-        // Translate description and address if needed
-        if (lang !== 'en') {
-          try {
-            const resDesc = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${lang}&dt=t&q=${encodeURIComponent(desc)}`);
-            const dataDesc = await resDesc.json();
-            translatedDesc = Array.isArray(dataDesc) ? dataDesc[0].map((d: any) => d[0]).join('') : desc;
-          } catch {}
-          try {
-            const resAddr = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=${lang}&dt=t&q=${encodeURIComponent(addr)}`);
-            const dataAddr = await resAddr.json();
-            translatedAddr = Array.isArray(dataAddr) ? dataAddr[0].map((d: any) => d[0]).join('') : addr;
-          } catch {}
-        }
-        // Translate doctors' descriptions if present
-        let translatedDocs = undefined;
-        if (Array.isArray(clinic.doctors)) {
-          translatedDocs = await Promise.all(
-            clinic.doctors.map(async (doc: any) => ({
-              ...doc,
-              description: doc.description
-                ? await translateText(doc.description, 'en', lang)
-                : '',
-            }))
-          );
-        }
-        translations[clinic.id] = {
-          desc: translatedDesc,
-          address: translatedAddr,
-          ...(translatedDocs ? { doctors: translatedDocs } : {}),
-        };
-      }
-      setDescTranslations(translations);
-    };
-    translateAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [results, lang]);
-
-
-const handleSearch = () => {
-  // If no filters, show all clinics
-  if (!search && !city && selectedServices.length === 0 && Object.keys(minPrices).length === 0 && Object.keys(maxPrices).length === 0) {
-    setResults(allClinics);
-    return;
-  }
-  fetchClinics();
-};
-
-const handleClearFilters = () => {
-  setSearch('');
-  setCity('');
-  setSelectedServices([]);
-  setMinPrices({});
-  setMaxPrices({});
-  setShowFavoritesOnly(false);
-  setSortService('spa'); // Reset to default
-  setResults(allClinics);
-};
-
-const getFavoriteAnimation = (clinicId: string) => {
-  if (!favoriteAnims.has(clinicId)) {
-    favoriteAnims.set(clinicId, new Animated.Value(1));
-  }
-  return favoriteAnims.get(clinicId)!;
-};
-
-const toggleFavorite = async (clinicId: string) => {
-  const newFavorites = favorites.includes(clinicId)
-    ? favorites.filter((id) => id !== clinicId)
-    : [...favorites, clinicId];
-  setFavorites(newFavorites);
-  await AsyncStorage.setItem('clinicFavorites', JSON.stringify(newFavorites));
-
-  const anim = getFavoriteAnimation(clinicId);
-  Animated.sequence([
-    Animated.timing(anim, { toValue: 1.5, duration: 150, useNativeDriver: true }),
-    Animated.timing(anim, { toValue: 1, duration: 150, useNativeDriver: true }),
-  ]).start();
-};
-const fetchClinics = async () => {
-  try {
+  const fetchClinics = async () => {
+    try {
       setLoading(true);
-    
-    // Build Firestore query
-    let q: any = collection(db, 'clinics');
-    const constraints: any[] = [];
 
-    // Filter by city
-    if (city) {
-      constraints.push(where('city', '==', city));
-    }
+      const clinicsRef = collection(db, 'clinics');
+      const q = query(clinicsRef);
+      const querySnapshot = await getDocs(q);
 
-    // Filter by search name (client-side filtering for text search)
-    // Note: Firestore doesn't support full-text search, so we'll filter client-side
-    
-    // Get all clinics first, then filter client-side
-    const querySnapshot = await getDocs(q);
-    let clinics = querySnapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as Clinic[];
+      const clinicList: Clinic[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
 
-    // Client-side filtering
-    if (search) {
-      const searchLower = search.toLowerCase();
-      clinics = clinics.filter(clinic => 
-        clinic.clinicName?.toLowerCase().includes(searchLower) ||
-        clinic.name?.toLowerCase().includes(searchLower)
-      );
-    }
+        // Extract services that are selected
+        const clinicServices: string[] = [];
+        let minServicePrice = Infinity;
 
-    // Filter by selected services
-    if (selectedServices.length > 0) {
-      clinics = clinics.filter(clinic => {
-        const clinicServices = clinic.services || {};
-        return selectedServices.some(service => 
-          clinicServices[service]?.selected === true
-        );
-      });
-    }
-
-    // Filter by price range (if specified)
-    if (Object.keys(minPrices).length > 0 || Object.keys(maxPrices).length > 0) {
-      clinics = clinics.filter(clinic => {
-        const clinicServices = clinic.services || {};
-        for (const service of selectedServices) {
-          const serviceData = clinicServices[service];
-          if (serviceData?.selected) {
-            const fee = parseFloat(serviceData.fee || '0');
-            const minPrice = minPrices[service] ? parseFloat(minPrices[service]) : 0;
-            const maxPrice = maxPrices[service] ? parseFloat(maxPrices[service]) : Infinity;
-            if (fee < minPrice || fee > maxPrice) {
-              return false;
+        if (data.services) {
+          Object.entries(data.services).forEach(([key, val]: [string, any]) => {
+            if (val.selected) {
+              clinicServices.push(key);
+              // Track minimum price for filtering
+              const fee = parseFloat(val.fee);
+              if (!isNaN(fee) && fee < minServicePrice) {
+                minServicePrice = fee;
+              }
             }
-          }
+          });
         }
-        return true;
-    });
-    }
 
-    // Sorting
-    if (sortService === 'price_asc') {
-      clinics.sort((a, b) => {
-        const aFee = parseFloat(a.services?.[selectedServices[0]]?.fee || '0');
-        const bFee = parseFloat(b.services?.[selectedServices[0]]?.fee || '0');
-        return aFee - bFee;
+        clinicList.push({
+          id: doc.id,
+          clinicName: data.clinicName || data.name || 'Unnamed Clinic',
+          name: data.name || data.clinicName || 'Unnamed Clinic',
+          city: data.city || '',
+          address: data.address || '',
+          description: data.description || 'No description available',
+          services: clinicServices,
+          minPrice: minServicePrice === Infinity ? 0 : minServicePrice,
+        });
       });
-    } else if (sortService === 'price_desc') {
-      clinics.sort((a, b) => {
-        const aFee = parseFloat(a.services?.[selectedServices[0]]?.fee || '0');
-        const bFee = parseFloat(b.services?.[selectedServices[0]]?.fee || '0');
-        return bFee - aFee;
-      });
+
+      setClinics(clinicList);
+    } catch (error) {
+      console.error('Error fetching clinics:', error);
+    } finally {
+      setLoading(false);
     }
-
-    setResults(clinics);
-  } catch (err) {
-    console.error('❌ Failed to load clinics:', err);
-    setResults([]);
-  } finally {
-    setLoading(false);
-  }
-};
-
-
-  const handleShowModal = (item: any) => {
-    setSelectedClinic(item);
-    setModalVisible(true);
   };
 
-  const displayedResults = React.useMemo(() => {
-    if (showFavoritesOnly) {
-      return results.filter(clinic => favorites.includes(clinic.id));
-    }
-    return results;
-  }, [results, showFavoritesOnly, favorites]);
+  const filtered = clinics.filter(c =>
+    (!name || c.clinicName.toLowerCase().includes(name.toLowerCase()) || c.name.toLowerCase().includes(name.toLowerCase())) &&
+    (!city || c.city === city) &&
+    (!service || c.services.includes(service)) &&
+    (!price || c.minPrice <= parseInt(price))
+  );
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
-      <HamburgerMenu />
-      <View style={styles.headerContainer}>
-        <TouchableOpacity style={styles.menuButton} onPress={openMenu} activeOpacity={0.8}>
-          <View style={styles.menuButtonInner}>
-            <View style={styles.menuLine} />
-            <View style={styles.menuLine} />
-            <View style={styles.menuLine} />
-          </View>
-        </TouchableOpacity>
-        <View style={styles.titleContainer}>
-          <Text style={styles.titleText}>{i18n.t('clinicSearch') || 'Clinic Search'}</Text>
-        </View>
-      </View>
-      {/* Main FlatList with header for filter/sort UI */}
-      {/* Filter Dropdown Content (absolute, professional card, scrollable, OVERLAYS cards) */}
-      {dropdownOpen && (
-        <View style={{
-          position: 'absolute',
-          top: 170,
-          left: 0,
-          right: 0,
-          backgroundColor: '#fff',
-          borderRadius: 22,
-          padding: 0,
-          shadowColor: '#000',
-          shadowOpacity: 0.12,
-          shadowRadius: 16,
-          elevation: 20,
-          zIndex: 2000,
-          maxHeight: 420,
-          marginHorizontal: 24,
-          alignSelf: 'center',
-        }}>
-          <ScrollView style={{ padding: 24 }} contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
-            {/* Clinic Name */}
-            <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>{i18n.t('clinicName') || 'Clinic Name'}</Text>
-            <TextInput
-              style={[styles.pillInput, { marginBottom: 16 }]}
-              placeholder={i18n.t('clinicNamePlaceholder')}
-              value={search}
-              onChangeText={setSearch}
-              placeholderTextColor="#888"
-            />
-            {/* City Picker */}
-            <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>{i18n.t('city') || 'City'}</Text>
-            <TouchableOpacity style={[styles.pillInput, { marginBottom: 16 }]} onPress={() => setCityModal(true)}>
-              <Text style={{ color: city ? '#000' : '#888', fontSize: 18 }}>
-                {city ? (i18n.t('city_' + city) !== 'city_' + city ? i18n.t('city_' + city) : city) : i18n.t('cityPlaceholder')}
-              </Text>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <LinearGradient
+        colors={['#000000', '#1a1a1a', '#2d2d2d']}
+        style={styles.gradient}
+      >
+        <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.menuButton} onPress={openMenu}>
+              <Ionicons name="menu" size={24} color="#fff" />
             </TouchableOpacity>
-            {/* Services Multi-select */}
-            <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>{i18n.t('selectServices') || 'Select Services'}</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12, gap: 6 }}>
-              {['spa', 'sauna', 'physio', 'ice_bath', 'massage', 'full_recovery', 'nutrition', 'rehab', 'stretching', 'other'].map(service => (
-                <TouchableOpacity
-                  key={service}
-                  onPress={() => {
-                    setSelectedServices(prev =>
-                      prev.includes(service)
-                        ? prev.filter(s => s !== service)
-                        : [...prev, service]
-                    );
-                  }}
-                  style={{
-                    backgroundColor: selectedServices.includes(service) ? '#1abc9c' : '#eee',
-                    paddingVertical: 8, paddingHorizontal: 16, borderRadius: 16, marginBottom: 6, marginRight: 6, minWidth: 80, alignItems: 'center', borderWidth: selectedServices.includes(service) ? 2 : 1, borderColor: selectedServices.includes(service) ? '#1abc9c' : '#ccc'
-                  }}
-                >
-                  <Text style={{ color: selectedServices.includes(service) ? '#fff' : '#333', fontWeight: 'bold' }}>{i18n.t(service)}</Text>
-                </TouchableOpacity>
-              ))}
+            <View style={styles.headerContent}>
+              <Text style={styles.headerTitle}>{i18n.t('searchClinics') || 'Search Clinics'}</Text>
+              <Text style={styles.headerSubtitle}>{i18n.t('findPerfectClinic') || 'Find the perfect clinic for your child'}</Text>
             </View>
-            {/* Fee Ranges for selected services */}
-            {selectedServices.map((service) => (
-              <View key={service} style={{ marginBottom: 14 }}>
-                <Text style={{ fontWeight: 'bold', marginBottom: 4 }}>{i18n.t(service)} {i18n.t('feeRange') || 'Fee Range'}</Text>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TextInput
-                    placeholder={i18n.t('min') || 'Min'}
-                    value={minPrices[service] || ''}
-                    onChangeText={(text) =>
-                      setMinPrices((prev) => ({ ...prev, [service]: text }))
-                    }
-                    keyboardType="numeric"
-                    style={{ flex: 1, borderBottomWidth: 1, borderColor: '#ccc', marginRight: 8, backgroundColor: '#f8f8f8', borderRadius: 8, padding: 8 }}
-                  />
-                  <TextInput
-                    placeholder={i18n.t('max') || 'Max'}
-                    value={maxPrices[service] || ''}
-                    onChangeText={(text) =>
-                      setMaxPrices((prev) => ({ ...prev, [service]: text }))
-                    }
-                    keyboardType="numeric"
-                    style={{ flex: 1, borderBottomWidth: 1, borderColor: '#ccc', backgroundColor: '#f8f8f8', borderRadius: 8, padding: 8 }}
-                  />
-                </View>
-              </View>
-            ))}
-            <TouchableOpacity style={[styles.searchBtn, { marginTop: 8 }]} onPress={() => { setDropdownOpen(false); handleSearch(); }}>
-              <Text style={styles.searchBtnText}>{i18n.t('search')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.searchBtn, { marginTop: 16, backgroundColor: '#e74c3c' }]}
-              onPress={() => { handleClearFilters(); setDropdownOpen(false); }}>
-              <Text style={styles.searchBtnText}>{i18n.t('clearFilters') || 'Clear Filters'}</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-      )}
-      <FlatList
-        data={loading ? [] : displayedResults}
-        keyExtractor={item => item.id}
-        ListHeaderComponent={
-          <View style={{ backgroundColor: '#000' }}>
-            {/* Professional filter dropdown and sort button layout */}
-            <View style={[styles.filterBoxSticky, { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 0, margin: 24, marginTop: 16 }]}> 
-              {/* Filter Dropdown Button */}
-              <TouchableOpacity
-                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#f4f4f4', borderRadius: 28, paddingVertical: 16, paddingHorizontal: 24, borderWidth: dropdownOpen ? 2 : 1, borderColor: dropdownOpen ? '#000' : '#f4f4f4', minHeight: 56, elevation: dropdownOpen ? 2 : 0 }}
-                onPress={() => setDropdownOpen((prev) => !prev)}
-                activeOpacity={0.8}
-              >
-                <Text style={{ fontSize: 18, color: '#000', flex: 1, fontWeight: 'bold' }}>{i18n.t('filters') || 'Filters'}</Text>
-                <Text style={{ fontSize: 20, color: '#888', marginLeft: 8 }}>{dropdownOpen ? '▲' : '▼'}</Text>
-              </TouchableOpacity>
-              {/* Favorites Button */}
-              <TouchableOpacity
-                style={{ backgroundColor: showFavoritesOnly ? '#ffd700' : '#f4f4f4', borderRadius: 28, padding: 16, alignItems: 'center', justifyContent: 'center', minHeight: 56, borderWidth: 1, borderColor: showFavoritesOnly ? '#e6c200' : '#f4f4f4' }}
-                onPress={() => setShowFavoritesOnly(prev => !prev)}
-                activeOpacity={0.8}
-              >
-                <Text style={{ fontSize: 24, color: showFavoritesOnly ? '#fff' : '#aaa' }}>★</Text>
-              </TouchableOpacity>
-              {/* Sort Button */}
-              <TouchableOpacity
-                style={{ backgroundColor: '#000', borderRadius: 28, paddingVertical: 16, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center', minHeight: 56, minWidth: 80, elevation: 2 }}
-                onPress={() => setSortModalOpen(true)}
-                activeOpacity={0.8}
-              >
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 18 }}>{i18n.t('sort') || 'Sort'}</Text>
-                <Text style={{ color: '#fff', fontSize: 18 }}>⇅</Text>
-              </TouchableOpacity>
-            </View>
-            {/* Sort Modal */}
-            <Modal visible={sortModalOpen} transparent animationType="fade">
-              <Pressable style={styles.modalOverlay} onPress={() => setSortModalOpen(false)} />
-              <View style={[styles.modalBox, { maxWidth: 340, alignSelf: 'center', top: 180, backgroundColor: '#fff', borderRadius: 22, padding: 0 }]}> 
-                <ScrollView style={{ padding: 24, maxHeight: 320 }} contentContainerStyle={{ paddingBottom: 12 }} showsVerticalScrollIndicator={false}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 18, color: '#000' }}>{i18n.t('sortBy') || 'Sort By'}</Text>
-                  {/* Sort by price, near me, rating, etc. */}
-                  <TouchableOpacity
-                    style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', alignItems: 'center' }}
-                    onPress={() => {
-                      setSortService('price_asc');
-                      setSortModalOpen(false);
-                      handleSearch();
-                    }}
-                  >
-                    <Text style={{ fontSize: 17, color: sortService === 'price_asc' ? '#1abc9c' : '#000', fontWeight: sortService === 'price_asc' ? 'bold' : 'normal' }}>{i18n.t('sort_price_asc')}</Text>
-                    {sortService === 'price_asc' && <Text style={{ marginLeft: 8, color: '#1abc9c' }}>✓</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', alignItems: 'center' }}
-                    onPress={() => {
-                      setSortService('price_desc');
-                      setSortModalOpen(false);
-                      handleSearch();
-                    }}
-                  >
-                    <Text style={{ fontSize: 17, color: sortService === 'price_desc' ? '#1abc9c' : '#000', fontWeight: sortService === 'price_desc' ? 'bold' : 'normal' }}>{i18n.t('sort_price_desc')}</Text>
-                    {sortService === 'price_desc' && <Text style={{ marginLeft: 8, color: '#1abc9c' }}>✓</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', alignItems: 'center' }}
-                    onPress={() => {
-                      setSortService('near_me');
-                      setSortModalOpen(false);
-                      handleSearch();
-                    }}
-                  >
-                    <Text style={{ fontSize: 17, color: sortService === 'near_me' ? '#1abc9c' : '#000', fontWeight: sortService === 'near_me' ? 'bold' : 'normal' }}>{i18n.t('sort_near_me') || 'Near Me'}</Text>
-                    {sortService === 'near_me' && <Text style={{ marginLeft: 8, color: '#1abc9c' }}>✓</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#eee', flexDirection: 'row', alignItems: 'center' }}
-                    onPress={() => {
-                      setSortService('rating_desc');
-                      setSortModalOpen(false);
-                      handleSearch();
-                    }}
-                  >
-                    <Text style={{ fontSize: 17, color: sortService === 'rating_desc' ? '#1abc9c' : '#000', fontWeight: sortService === 'rating_desc' ? 'bold' : 'normal' }}>{i18n.t('sort_rating_desc')}</Text>
-                    {sortService === 'rating_desc' && <Text style={{ marginLeft: 8, color: '#1abc9c' }}>✓</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{ paddingVertical: 14, flexDirection: 'row', alignItems: 'center' }}
-                    onPress={() => {
-                      setSortService('rating_asc');
-                      setSortModalOpen(false);
-                      handleSearch();
-                    }}
-                  >
-                    <Text style={{ fontSize: 17, color: sortService === 'rating_asc' ? '#1abc9c' : '#000', fontWeight: sortService === 'rating_asc' ? 'bold' : 'normal' }}>{i18n.t('sort_rating_asc')}</Text>
-                    {sortService === 'rating_asc' && <Text style={{ marginLeft: 8, color: '#1abc9c' }}>✓</Text>}
-                  </TouchableOpacity>
-                </ScrollView>
-              </View>
-            </Modal>
-            <Modal visible={cityModal} transparent animationType="fade">
-              <Pressable style={styles.modalOverlay} onPress={() => setCityModal(false)} />
-              <View style={styles.modalBox}>
-                <ScrollView>
-                  {cities.map(c => (
-                    <TouchableOpacity key={c} style={styles.modalItem} onPress={() => { setCity(c); setCityModal(false); }}>
-                      <Text style={{ color: '#000', fontSize: 18 }}>
-                        {(() => {
-                          const cityKey = 'city_' + c.replace(/\s+/g, '');
-                          const translation = i18n.t(cityKey);
-                          return translation !== cityKey ? translation : c;
-                        })()}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            </Modal>
           </View>
-        }
-        renderItem={({ item }) => {
-          let desc = item.description;
-          if (lang !== 'en') {
-            desc = typeof descTranslations[item.id]?.desc === 'string'
-              ? descTranslations[item.id]?.desc
-              : item.description;
-          }
-          return (
-            <TouchableOpacity onPress={() => handleShowModal(item)}>
-              <View style={[styles.card, styles.cardBlack, { maxWidth: 340, width: '95%', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', padding: 12 }]}> 
-                {/* Profile Photo */}
-                {item.profile_photo ? (
-                  <Image source={{ uri: item.profile_photo }} style={{ width: 54, height: 54, borderRadius: 27, marginRight: 14, backgroundColor: '#eee', borderWidth: 1, borderColor: '#fff' }} />
-                ) : (
-                  <Image source={require('../assets/logo.png')} style={{ width: 54, height: 54, borderRadius: 27, marginRight: 14, backgroundColor: '#eee', borderWidth: 1, borderColor: '#fff', tintColor: '#fff', opacity: 0.7 }} />
-                )}
-                <TouchableOpacity
-                  style={{ position: 'absolute', top: -4, right: -4, zIndex: 1, padding: 8 }}
-                  onPress={(e) => { e.stopPropagation(); toggleFavorite(item.id); }}
-                >
-                  <Animated.Text style={{ fontSize: 28, color: favorites.includes(item.id) ? '#ffd700' : '#aaa', transform: [{ scale: getFavoriteAnimation(item.id) }] }}>
-                    ★
-                  </Animated.Text>
-                </TouchableOpacity>
-                <View style={{ flex: 1 }}>
-                  {/* ✅ Clinic Name (not translated) */}
-                  <Text style={[styles.cardTitle, { color: '#fff' }]}>{item.clinic_name || item.name}</Text>
-                  {/* ✅ Translated City */}
-                  <Text style={[styles.cardCity, { color: '#bbb' }]}>
-                    {(() => {
-                      const cityKey = 'city_' + item.city.replace(/\s+/g, '');
-                      const translation = i18n.t(cityKey);
-                      return translation !== cityKey ? translation : item.city;
-                    })()}
-                  </Text>
-                  {/* ✅ Address (translated if available) */}
-                  {item.address ? (
-                    <Text style={{ color: '#ccc', marginTop: 2 }}>
-                      {lang !== 'en'
-                        ? (descTranslations[item.id]?.address !== undefined
-                            ? descTranslations[item.id]?.address
-                            : '')
-                        : item.address}
-                    </Text>
-                  ) : null}
-                  {item.doctors && Array.isArray(item.doctors) && item.doctors.length > 0 && (
-  <Text style={{ color: '#ccc', marginTop: 2 }}>
-    {i18n.t('doctor')}: {item.doctors[0].name}
-  </Text>
-)}
 
-                  {/* ✅ Description (translated if available) */}
-                  {desc ? (
-                    <Text style={[styles.cardDesc, { color: '#eee' }]} numberOfLines={2} ellipsizeMode="tail">{desc}</Text>
-                  ) : null}
-                  {/* Working hours removed from card as requested (double check: nothing rendered here) */}
-                  {/* ✅ Translated Services with Fees */}
-                  <View style={{ marginTop: 4 }}>
-                    {Object.keys(item).map((key) => {
-                      if (key.endsWith('_fee') && item[key]) {
-                        const service = key.replace('_fee', '');
-                        return (
-                          <View key={key} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                            <Text style={{ color: '#eee', fontSize: 13 }}>
-                              {i18n.t(service) !== service ? i18n.t(service) : service}
-                            </Text>
-                            <Text style={{ color: '#eee', fontSize: 13 }}>{item[key]} EGP</Text>
-                          </View>
-                        );
-                      }
-                      return null;
-                    })}
-                  </View>
-                </View>
+          <HamburgerMenu />
+
+          <ScrollView
+            style={styles.filtersCard}
+            contentContainerStyle={styles.filtersCardContent}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled={true}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.filterRow}>
+              <View style={styles.filterInputWrapper}>
+                <Ionicons name="search-outline" size={20} color="#999" style={styles.filterIcon} />
+                <TextInput
+                  style={styles.filterInput}
+                  value={name}
+                  onChangeText={setName}
+                  placeholder={i18n.t('clinicNameLabel') || 'Clinic Name'}
+                  placeholderTextColor="#999"
+                />
               </View>
-            </TouchableOpacity>
-          );
-        }}
-        ListEmptyComponent={
-          loading ? (
-            <View style={{ paddingTop: 20 }}>
-              <ClinicCardSkeleton />
-              <ClinicCardSkeleton />
-              <ClinicCardSkeleton />
+            </View>
+
+            <View style={styles.filterRow}>
+              <TouchableOpacity style={styles.filterInputWrapper} onPress={() => setCityModal(true)}>
+                <Ionicons name="location-outline" size={20} color="#999" style={styles.filterIcon} />
+                <Text style={[styles.filterText, !city && styles.filterPlaceholder]}>
+                  {city ? cities.find(c => c.key === city)?.label || city : i18n.t('city')}
+                </Text>
+                <Ionicons name="chevron-down" size={20} color="#999" />
+              </TouchableOpacity>
+            </View>
+
+            <Modal visible={cityModal} transparent animationType="fade" onRequestClose={() => setCityModal(false)}>
+              <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setCityModal(false)}>
+                <View style={styles.modalContent}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>{i18n.t('selectCity')}</Text>
+                    <TouchableOpacity onPress={() => setCityModal(false)}>
+                      <Ionicons name="close" size={24} color="#000" />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView style={styles.modalScrollView}>
+                    {cities.map((item) => (
+                      <TouchableOpacity
+                        key={item.key}
+                        style={[styles.modalOption, city === item.key && styles.modalOptionSelected]}
+                        onPress={() => {
+                          setCity(item.key);
+                          setCityModal(false);
+                        }}
+                      >
+                        <Text style={[styles.modalOptionText, city === item.key && styles.modalOptionTextSelected]}>
+                          {item.label}
+                        </Text>
+                        {city === item.key && <Ionicons name="checkmark" size={20} color="#fff" />}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              </TouchableOpacity>
+            </Modal>
+
+            <View style={styles.filterRow}>
+              <TouchableOpacity style={styles.filterInputWrapper} onPress={() => setServiceModal(true)}>
+                <Ionicons name="medical-outline" size={20} color="#999" style={styles.filterIcon} />
+                <Text style={[styles.filterText, !service && styles.filterPlaceholder]}>
+                  {service ? servicesList.find(s => s.key === service)?.label : i18n.t('service') || 'Service'}
+                </Text>
+                <Ionicons name="chevron-down" size={20} color="#999" />
+              </TouchableOpacity>
+            </View>
+
+            <Modal visible={serviceModal} transparent animationType="fade" onRequestClose={() => setServiceModal(false)}>
+              <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setServiceModal(false)}>
+                <View style={styles.modalContent}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>{i18n.t('selectService') || 'Select Service'}</Text>
+                    <TouchableOpacity onPress={() => setServiceModal(false)}>
+                      <Ionicons name="close" size={24} color="#000" />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView style={styles.modalScrollView}>
+                    {servicesList.map((item) => (
+                      <TouchableOpacity
+                        key={item.key}
+                        style={[styles.modalOption, service === item.key && styles.modalOptionSelected]}
+                        onPress={() => {
+                          setService(item.key);
+                          setServiceModal(false);
+                        }}
+                      >
+                        <Text style={[styles.modalOptionText, service === item.key && styles.modalOptionTextSelected]}>
+                          {item.label}
+                        </Text>
+                        {service === item.key && <Ionicons name="checkmark" size={20} color="#fff" />}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              </TouchableOpacity>
+            </Modal>
+
+            <View style={styles.filterRow}>
+              <View style={styles.filterInputWrapper}>
+                <Ionicons name="cash-outline" size={20} color="#999" style={styles.filterIcon} />
+                <TextInput
+                  style={styles.filterInput}
+                  value={price}
+                  onChangeText={setPrice}
+                  placeholder={i18n.t('maxPrice') || 'Max Price'}
+                  placeholderTextColor="#999"
+                  keyboardType="numeric"
+                />
+              </View>
+            </View>
+          </ScrollView>
+
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#fff" />
+              <Text style={styles.loadingText}>Loading clinics...</Text>
             </View>
           ) : (
-            <Text style={styles.empty}>{i18n.t('noResults')}</Text>
-          )
-        }
-        style={{ marginTop: 0 }}
-        contentContainerStyle={{ paddingBottom: 20 }}
-      />
-      {/* Modal for summary/details with fade transition */}
-      <Modal visible={modalVisible} animationType="none" transparent onRequestClose={() => setModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalBox, { backgroundColor: '#000', borderRadius: 20, padding: 24, maxHeight: 520 }]}> 
-            {selectedClinic && (
-              <>
-                <View style={{ alignItems: 'center', marginBottom: 16 }}>
-                  {selectedClinic.profile_photo ? (
-                    <Image source={{ uri: selectedClinic.profile_photo }} style={{ width: 70, height: 70, borderRadius: 35, marginBottom: 8, backgroundColor: '#eee', borderWidth: 2, borderColor: '#fff' }} />
-                  ) : (
-                    <Image source={require('../assets/logo.png')} style={{ width: 70, height: 70, borderRadius: 35, marginBottom: 8, backgroundColor: '#eee', borderWidth: 2, borderColor: '#fff', tintColor: '#fff', opacity: 0.7 }} />
-                  )}
-                  <Text style={[styles.cardTitle, { color: '#fff', fontSize: 22, marginBottom: 2 }]}>{selectedClinic.clinic_name || selectedClinic.name}</Text>
-                </View>
-                <Text style={[styles.cardCity, { color: '#fff' }]}>
-                  {(() => {
-                    const cityKey = 'city_' + selectedClinic.city.replace(/\s+/g, '');
-                    const translation = i18n.t(cityKey);
-                    return translation !== cityKey ? translation : selectedClinic.city;
-                  })()}
-                </Text>
-                <Text style={[styles.cardDesc, { color: '#fff', marginBottom: 12 }]}>
-                  {lang !== 'en'
-                    ? (typeof descTranslations[selectedClinic.id]?.desc === 'string'
-                        ? descTranslations[selectedClinic.id]?.desc
-                        : selectedClinic.description)
-                    : selectedClinic.description}
-                </Text>
-               
-                <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 17, marginBottom: 8 }}>{i18n.t('serviceFees') || 'Service Fees:'}</Text>
-                <View style={{ width: '100%', marginBottom: 16 }}>
-                  {selectedClinic.services && typeof selectedClinic.services === 'object'
-                    ? Object.entries(selectedClinic.services)
-                        .filter(([, v]: [string, any]) => v && (v.selected || (v.fee != null && String(v.fee).trim() !== '')))
-                        .map(([name, v]: [string, any]) => (
-                          <View key={name} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                            <Text style={{ color: '#fff', fontSize: 16 }}>{i18n.t(name) !== name ? i18n.t(name) : name}</Text>
-                            <Text style={{ color: '#fff', fontSize: 16 }}>{v?.fee != null ? `${v.fee} EGP` : '—'}</Text>
-                          </View>
-                        ))
-                    : Object.keys(selectedClinic).map((key) => {
-                        if (key.endsWith('_fee') && selectedClinic[key]) {
-                          const service = key.replace('_fee', '');
-                          return (
-                            <View key={key} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                              <Text style={{ color: '#fff', fontSize: 16 }}>{i18n.t(service) || service}</Text>
-                              <Text style={{ color: '#fff', fontSize: 16 }}>{selectedClinic[key]} EGP</Text>
-                            </View>
-                          );
-                        }
-                        return null;
-                      })}
-                </View>
-                <TouchableOpacity style={styles.reserveBtn} onPress={() => {
-                  setModalVisible(false);
-                  router.push({ pathname: '/clinic-details', params: { clinic: JSON.stringify(selectedClinic) } });
-                }}>
-                  <Text style={styles.reserveBtnText}>{i18n.t('viewDetails') || 'View Details'}</Text>
+            <FlatList
+              data={filtered}
+              keyExtractor={item => item.id}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  onPress={() => router.push({ pathname: '/clinic-details', params: { clinic: JSON.stringify(item) } })}
+                  style={styles.card}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.cardHeader}>
+                    <View style={styles.cardIcon}>
+                      <Ionicons name="medical" size={24} color="#000" />
+                    </View>
+                    <View style={styles.cardHeaderText}>
+                      <Text style={styles.cardTitle}>{item.clinicName}</Text>
+                      <View style={styles.cardLocation}>
+                        <Ionicons name="location" size={14} color="#666" />
+                        <Text style={styles.cardCity}>{item.city}</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <Text style={styles.cardDesc}>{item.description}</Text>
+                  <View style={styles.cardFooter}>
+                    <View style={styles.cardServices}>
+                      <Ionicons name="list" size={16} color="#666" />
+                      <Text style={styles.cardServicesText}>{item.services.length} {i18n.t('services') || 'services'}</Text>
+                    </View>
+                    <Text style={styles.cardPrice}>{i18n.t('price')}: {item.minPrice > 0 ? `${item.minPrice} EGP` : 'N/A'}</Text>
+                  </View>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.closeBtn} onPress={() => setModalVisible(false)}>
-                  <Text style={styles.closeBtnText}>{i18n.t('close') || 'Close'}</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
-      <Image source={require('../assets/logo.png')} style={styles.forsaLogo} />
-    </View>
+              )}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Ionicons name="medical-outline" size={64} color="#666" />
+                  <Text style={styles.emptyText}>{i18n.t('noClinicsFound') || 'No clinics found'}</Text>
+                  <Text style={styles.emptySubtext}>Try adjusting your filters</Text>
+                </View>
+              }
+            />
+          )}
+        </Animated.View>
+      </LinearGradient>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000', padding: 0 },
-  headerContainer: {
-    backgroundColor: '#000',
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    paddingTop: 60,
-    paddingBottom: 32,
+  container: {
+    flex: 1,
+  },
+  gradient: {
+    flex: 1,
+  },
+  header: {
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
     paddingHorizontal: 24,
+    paddingBottom: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 0,
-    zIndex: 10,
-    width: '100%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
   },
   menuButton: {
     width: 44,
     height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
-    zIndex: 100,
   },
-  menuButtonInner: {
-    width: 44,
-    height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: '#000',
-  },
-  menuLine: {
-    width: 28,
-    height: 4,
-    backgroundColor: '#000',
-    marginVertical: 3,
-    borderRadius: 2,
-  },
-  titleContainer: {
+  headerContent: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: -44,
-    paddingHorizontal: 44,
   },
-  titleBar: {
-    backgroundColor: '#000',
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    paddingTop: 60,
-    paddingBottom: 32,
-    alignItems: 'center',
-    marginBottom: 18,
-    zIndex: 10,
-    width: '100%',
-  },
-  titleText: {
-    color: '#fff',
-    fontSize: 32,
+  headerTitle: {
+    fontSize: 28,
     fontWeight: 'bold',
-    letterSpacing: 1,
+    color: '#fff',
+    marginBottom: 4,
     textAlign: 'center',
   },
-  filterBoxSticky: {
+  headerSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+  },
+  filtersCard: {
     backgroundColor: '#fff',
-    borderRadius: 22,
-    padding: 24,
-    margin: 24,
-    marginTop: 0,
+    borderRadius: 20,
+    marginHorizontal: 20,
+    marginTop: 20,
+    marginBottom: 16,
     shadowColor: '#000',
-    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
     shadowRadius: 8,
-    elevation: 2,
-    flexDirection: 'column',
-    gap: 18,
-    alignItems: 'stretch',
+    elevation: 4,
+    maxHeight: 300, // Limit height to enable scrolling
   },
-  pillInput: { minWidth: 220, borderRadius: 28, backgroundColor: '#f4f4f4', paddingVertical: 18, paddingHorizontal: 28, fontSize: 20, color: '#000', borderWidth: 0, marginBottom: 0, marginTop: 0, marginHorizontal: 0 },
-  searchBtn: { backgroundColor: '#000', borderRadius: 28, paddingVertical: 18, paddingHorizontal: 36, alignItems: 'center', justifyContent: 'center', marginTop: 10, minWidth: 120 },
-  searchBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
-  card: { backgroundColor: '#fff', borderRadius: 14, padding: 18, marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, elevation: 2 },
-  cardBlack: { backgroundColor: '#111', borderColor: '#000', borderWidth: 1 },
-  cardTitle: { fontWeight: 'bold', fontSize: 19, color: '#000', marginBottom: 4 },
-  cardCity: { color: '#888', fontSize: 15, marginBottom: 2 },
-  cardDesc: { color: '#222', fontSize: 15, marginTop: 4 },
-  empty: { color: '#888', textAlign: 'center', marginTop: 40 },
-  modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.18)' },
-  modalBox: { position: 'absolute', top: 160, left: 30, right: 30, backgroundColor: '#fff', borderRadius: 14, padding: 10, maxHeight: 320, zIndex: 100, elevation: 10 },
-  modalItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
-  forsaLogo: {
-    position: 'absolute',
-    bottom: 18,
-    left: '50%',
-    transform: [{ translateX: -24 }],
-    width: 48,
-    height: 48,
-    opacity: 0.22,
-    tintColor: '#000',
-    zIndex: 1,
+  filtersCardContent: {
+    padding: 20,
   },
-  reserveBtn: {
+  filterRow: {
+    marginBottom: 12,
+  },
+  filterInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#f5f5f5',
+    paddingHorizontal: 16,
+    minHeight: 56,
+  },
+  filterIcon: {
+    marginRight: 12,
+  },
+  filterInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#000',
+    paddingVertical: 16,
+  },
+  filterText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#000',
+    paddingVertical: 16,
+  },
+  filterPlaceholder: {
+    color: '#999',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
     backgroundColor: '#fff',
-    borderRadius: 22,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
+    borderRadius: 20,
+    width: '90%',
+    maxHeight: '70%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  modalScrollView: {
+    maxHeight: 400,
+  },
+  modalOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  modalOptionSelected: {
+    backgroundColor: '#000',
+  },
+  modalOptionText: {
+    fontSize: 16,
+    color: '#000',
+  },
+  modalOptionTextSelected: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#fff',
+    marginTop: 16,
+  },
+  listContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  cardHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
-    marginTop: 4,
   },
-  reserveBtnText: {
-    color: '#000',
-    fontWeight: 'bold',
-    fontSize: 17,
-  },
-  closeBtn: {
-    backgroundColor: 'transparent',
-    borderRadius: 22,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
+  cardIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#fff',
+    marginRight: 12,
   },
-  closeBtnText: {
-    color: '#fff',
+  cardHeaderText: {
+    flex: 1,
+  },
+  cardTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
-    fontSize: 17,
+    color: '#000',
+    marginBottom: 4,
+  },
+  cardLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cardCity: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 4,
+  },
+  cardDesc: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  cardServices: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cardServicesText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 4,
+  },
+  cardPrice: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 16,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginTop: 8,
   },
 });

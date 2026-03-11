@@ -1,96 +1,158 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, Alert, ActivityIndicator, Modal } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import i18n from '../locales/i18n';
-import { db, auth } from '../lib/firebase';
-import { collection, addDoc, doc, getDoc } from 'firebase/firestore';
-import { notifyProviderAndAdmins, createNotification } from '../services/NotificationService';
 import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useRef, useState, useEffect } from 'react';
+import { Alert, Animated, Easing, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import i18n from '../locales/i18n';
+import { auth, db } from '../lib/firebase';
+import { doc, getDoc, collection, addDoc } from 'firebase/firestore';
+import { notifyProviderAndAdmins, createNotification } from '../services/NotificationService';
 
 export default function ClinicDetailsScreen() {
-  const router = useRouter();
   const params = useLocalSearchParams();
-  const [favorites, setFavorites] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
+  const router = useRouter();
+  const [clinic, setClinic] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [bookingLoading, setBookingLoading] = useState(false);
-  const [doctorModalVisible, setDoctorModalVisible] = useState(false);
-  const [selectedService, setSelectedService] = useState<string | null>(null);
-  const [bookingDate, setBookingDate] = useState(() => new Date());
-  const [bookingTime, setBookingTime] = useState(() => {
-    const d = new Date();
-    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-  });
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [showTimePicker, setShowTimePicker] = useState(false);
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-  let clinic = null;
-  try {
-    clinic = params.clinic ? JSON.parse(params.clinic as string) : null;
-
-    // 👇 Parse working_hours if it's a string
-    if (clinic?.working_hours && typeof clinic.working_hours === 'string') {
-      try {
-        clinic.working_hours = JSON.parse(clinic.working_hours);
-      } catch (err) {
-        console.error('⚠️ Cannot parse working_hours:', err);
-      }
-    }
-  } catch (err) {
-    clinic = null;
-  }
+  const [selectedServiceIndex, setSelectedServiceIndex] = useState(0);
+  const [selectedDoctorIndex, setSelectedDoctorIndex] = useState(0);
+  const [bookingComments, setBookingComments] = useState('');
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const loadFavorites = async () => {
-      try {
-        const storedFavorites = await AsyncStorage.getItem('clinicFavorites');
-        if (storedFavorites) {
-          setFavorites(JSON.parse(storedFavorites));
-        }
-      } catch (e) {
-        console.error("Failed to load favorites", e);
-      }
-    };
-    loadFavorites();
-  }, []);
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 600,
+      easing: Easing.out(Easing.exp),
+      useNativeDriver: true,
+    }).start();
 
-  const toggleFavorite = async (clinicId: string) => {
-    if (!clinicId) return;
-    const newFavorites = favorites.includes(clinicId)
-      ? favorites.filter((id) => id !== clinicId)
-      : [...favorites, clinicId];
-    setFavorites(newFavorites);
-    await AsyncStorage.setItem('clinicFavorites', JSON.stringify(newFavorites));
-    Animated.sequence([
-      Animated.timing(scaleAnim, { toValue: 1.5, duration: 150, useNativeDriver: true }),
-      Animated.timing(scaleAnim, { toValue: 1, duration: 150, useNativeDriver: true }),
-    ]).start();
+    // Support both id param and clinic JSON string to get the ID
+    let clinicId = params.id as string;
+    if (!clinicId && params.clinic) {
+      try {
+        const parsed = JSON.parse(params.clinic as string);
+        clinicId = parsed.id;
+      } catch (e) {}
+    }
+
+    if (clinicId) {
+      fetchClinicDetails(clinicId);
+    } else {
+      setLoading(false);
+    }
+  }, [params.id, params.clinic]);
+
+  const fetchClinicDetails = async (id: string) => {
+    try {
+      setLoading(true);
+      const docRef = doc(db, 'clinics', id);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+
+        // Transform services data
+        const servicesList: any[] = [];
+        if (data.services) {
+          Object.entries(data.services).forEach(([key, val]: [string, any]) => {
+            if (val.selected) {
+              servicesList.push({
+                name: i18n.t(key) || key,
+                fee: val.fee
+              });
+            }
+          });
+        }
+
+        // Transform working hours
+        const workingHoursList: any[] = [];
+        if (data.workingHours) {
+          const daysOrder = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+          daysOrder.forEach(day => {
+            if (data.workingHours[day]) {
+              const dayData = data.workingHours[day];
+              workingHoursList.push({
+                day: i18n.t(day) || day,
+                from: dayData.off ? 'Closed' : dayData.from,
+                to: dayData.off ? '' : dayData.to,
+                off: dayData.off
+              });
+            }
+          });
+        }
+
+        setClinic({
+          id: docSnap.id,
+          name: data.clinicName || data.name,
+          city: data.city,
+          address: data.address,
+          email: data.email,
+          phone: data.phone,
+          desc: data.description,
+          services: servicesList,
+          workingHours: workingHoursList,
+          doctors: data.doctors ? data.doctors.map((d: any) => d.name) : []
+        });
+      } else {
+      }
+    } catch (error) {
+      console.error('Error fetching clinic details:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleReserve = async (doctorName?: string, serviceName?: string) => {
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#fff" />
+      </View>
+    );
+  }
+
+  if (!clinic) {
+    return (
+      <View style={styles.errorContainer}>
+        <LinearGradient colors={['#000000', '#1a1a1a', '#2d2d2d']} style={styles.gradient}>
+          <View style={styles.errorContent}>
+            <Ionicons name="alert-circle-outline" size={64} color="#fff" />
+            <Text style={styles.errorText}>{i18n.t('clinicNotFound') || 'Clinic not found.'}</Text>
+            <TouchableOpacity style={styles.backButtonLarge} onPress={() => router.back()}>
+              <Text style={styles.backButtonText}>{i18n.t('goBack') || 'Go Back'}</Text>
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+      </View>
+    );
+  }
+
+  const handleCall = () => {
+    if (clinic.phone) {
+      Linking.openURL(`tel:${clinic.phone}`);
+    } else {
+      Alert.alert(i18n.t('error') || 'Error', 'No phone number available');
+    }
+  };
+
+  const handleReserve = async (doctor?: string) => {
     const user = auth.currentUser;
     if (!user) {
       Alert.alert(i18n.t('error') || 'Error', i18n.t('loginRequired') || 'You must be logged in to book');
       return;
     }
 
-    // If no doctor selected and there are doctors, show modal
-    if (!doctorName && doctors.length > 0) {
-      setDoctorModalVisible(true);
-      return;
-    }
-
-    // If no doctors available, still allow booking
-    const selectedDoctor = doctorName || (doctors.length > 0 ? doctors[0].name : 'General Consultation');
-    const selectedServiceName = serviceName || (services.length > 0 ? services[0].name : 'General Service');
-    const rawFee = clinic.services?.[selectedServiceName]?.fee ?? clinic[`${selectedServiceName}_fee`] ?? (services.length > 0 ? services[0].fee : 0);
-    const servicePrice = Number(rawFee) || 0;
+    const selectedDoctor =
+      doctor ?? (clinic.doctors && clinic.doctors.length > 0 ? clinic.doctors[selectedDoctorIndex] : null);
+    const doctorName = selectedDoctor || (i18n.t('noSpecificDoctor') || 'No specific doctor');
+    const serviceList = clinic.services && clinic.services.length > 0 ? clinic.services : [];
+    const selectedService = serviceList[selectedServiceIndex];
+    const serviceName = selectedService ? selectedService.name : 'General';
+    const servicePrice = selectedService ? Number(selectedService.fee) || 0 : 0;
 
     try {
       setBookingLoading(true);
 
-      // Fetch user name from Firestore
       let playerName = user.displayName || 'Player';
       try {
         const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -98,57 +160,34 @@ export default function ClinicDetailsScreen() {
           const userData = userDoc.data();
           playerName = userData.name || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || playerName;
         }
-      } catch (err) {
-      }
-
-      // Fetch clinic details from Firestore if available
-      let clinicName = clinic.clinic_name || clinic.name || 'Clinic';
-      let clinicCity = clinic.city || '';
-      let clinicId = clinic.id || '';
-
-      try {
-        if (clinicId) {
-          const clinicDoc = await getDoc(doc(db, 'clinics', clinicId));
-          if (clinicDoc.exists()) {
-            const clinicData = clinicDoc.data();
-            clinicName = clinicData.clinicName || clinicData.name || clinicName;
-            clinicCity = clinicData.city || clinicCity;
-          }
-        }
-      } catch (err) {
-      }
-
-      const dateStr = bookingDate.toISOString().split('T')[0];
-      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const dayOfWeek = dayNames[bookingDate.getDay()];
+      } catch (err) {}
 
       const bookingData = {
         playerId: user.uid,
-        parentId: user.uid, // Add parentId for consistency with parent-bookings.tsx
+        parentId: user.uid, // Add parentId for consistency
         playerName: playerName,
         customerName: playerName, // Standardized field for admin
-        providerId: clinicId || clinic.id || '',
-        providerName: clinicName,
+        providerId: clinic.id,
+        providerName: clinic.name,
         type: 'clinic',
         status: 'pending',
-        date: dateStr,
-        day: dayOfWeek,
-        time: bookingTime,
+        date: new Date().toISOString().split('T')[0],
         createdAt: new Date().toISOString(),
-        name: clinicName,
-        city: clinicCity,
-        doctor: selectedDoctor,
-        service: selectedServiceName,
-        price: Number(servicePrice) || 0,
+        name: clinic.name,
+        city: clinic.city,
+        doctor: doctorName,
+        service: serviceName,
+        price: servicePrice,
+        comments: bookingComments.trim() || null,
       };
 
       const bookingRef = await addDoc(collection(db, 'bookings'), bookingData);
-      const providerId = clinicId || clinic.id || '';
+      const providerId = clinic.id;
       try {
         await notifyProviderAndAdmins(
           providerId,
           i18n.t('newBookingRequest') || 'New booking request',
-          `${playerName} ${i18n.t('requestedBooking') || 'requested a booking'}: ${selectedServiceName}`,
+          `${playerName} ${i18n.t('requestedBooking') || 'requested a booking'}: ${serviceName}`,
           'booking',
           { bookingId: bookingRef.id },
           user.uid
@@ -156,7 +195,7 @@ export default function ClinicDetailsScreen() {
         await createNotification({
           userId: user.uid,
           title: i18n.t('bookingRequestSent') || 'Booking request sent',
-          body: `${clinicName} – ${selectedDoctor}, ${selectedServiceName}`,
+          body: `${clinic.name} – ${doctorName}, ${serviceName}`,
           type: 'booking',
           data: { bookingId: bookingRef.id },
         });
@@ -165,573 +204,503 @@ export default function ClinicDetailsScreen() {
       }
 
       Alert.alert(
-        i18n.t('reservation') || 'Reservation',
-        `${i18n.t('reservationSuccess') || 'Reservation request sent!'}\n${i18n.t('doctor') || 'Doctor'}: ${selectedDoctor}\n${i18n.t('service') || 'Service'}: ${selectedServiceName}`,
+        i18n.t('success') || 'Success',
+        `${i18n.t('reservationSuccess') || 'Reservation request sent!'}\n${i18n.t('doctor') || 'Doctor'}: ${doctorName}\n${i18n.t('service') || 'Service'}: ${serviceName}`,
         [{ text: i18n.t('ok') || 'OK', onPress: () => router.push('/player-bookings') }]
       );
-      setDoctorModalVisible(false);
     } catch (error) {
-      console.error('Error creating clinic booking:', error);
+      console.error('Error creating booking:', error);
       Alert.alert(i18n.t('error') || 'Error', i18n.t('bookingFailed') || 'Failed to create booking');
     } finally {
       setBookingLoading(false);
     }
   };
-  if (!clinic) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>{i18n.t('noDetails') || 'No details available'}</Text>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backBtnText}>{i18n.t('close') || 'Close'}</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-  // Services: support Firestore format (clinic.services) and legacy (*_fee keys)
-  const servicesFromMap =
-    clinic.services && typeof clinic.services === 'object'
-      ? Object.entries(clinic.services)
-          .filter(([, v]: [string, any]) => v && (v.selected || (v.fee != null && String(v.fee).trim() !== '')))
-          .map(([name, v]: [string, any]) => ({ name, fee: v?.fee != null ? String(v.fee) : '' }))
-      : [];
-  const servicesFromFeeKeys = Object.keys(clinic)
-    .filter((key) => key.endsWith('_fee') && clinic[key])
-    .map((key) => ({ name: key.replace('_fee', ''), fee: String(clinic[key] ?? '') }));
-  const services = servicesFromMap.length > 0 ? servicesFromMap : servicesFromFeeKeys;
-
-  // Timings: support Firestore workingHours and legacy working_hours
-  const timings = clinic.workingHours || clinic.working_hours;
-  // Fallback demo doctors if not present
-  // Accepts both new and old doctor formats
-  const doctors = (clinic.doctors || [
-    { name: 'Dr. Ahmed Ali', specialty: 'Physiotherapist' },
-    { name: 'Dr. Mona Hassan', specialty: 'Nutritionist' },
-  ]).map((doc: any) => ({
-    name: doc.name,
-    major: doc.major || doc.specialty || '',
-    description: doc.description || '',
-    photoUri: doc.photoUri || doc.photo || '',
-  }));
 
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingBottom: 40 }}>
-        <View style={styles.headerBox}>
-          {(clinic.profilePhoto || clinic.profile_photo) ? (
-            <Image source={{ uri: clinic.profilePhoto || clinic.profile_photo }} style={styles.profilePhoto} />
-          ) : (
-            <Image source={require('../assets/logo.png')} style={styles.logo} />
-          )}
-          <Text style={styles.title}>{clinic.clinicName || clinic.clinic_name || clinic.name}</Text>
-          <TouchableOpacity
-            style={styles.favoriteBtn}
-            onPress={() => toggleFavorite(clinic.id)}
-          >
-            <Animated.Text style={{ fontSize: 32, color: favorites.includes(clinic.id) ? '#ffd700' : '#aaa', transform: [{ scale: scaleAnim }] }}>
-              ★
-            </Animated.Text>
-          </TouchableOpacity>
-          <Text style={styles.city}>{clinic.city}</Text>
-        </View>
-        <View style={styles.sectionBox}>
-          <Text style={styles.sectionTitle}>{i18n.t('address') || 'Address'}</Text>
-          <Text style={styles.sectionText}>{clinic.address || '—'}</Text>
-        </View>
-        <View style={styles.sectionBox}>
-          <Text style={styles.sectionTitle}>{i18n.t('description') || 'Description'}</Text>
-          <Text style={styles.sectionText}>{clinic.description || '—'}</Text>
-        </View>
-        {/* Working Hours Table */}
-        <View style={styles.sectionBox}>
-          <Text style={styles.sectionTitle}>{i18n.t('workingHours') || 'Working Hours'}</Text>
-          <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: '#eee', marginBottom: 6 }}>
-            <Text style={[styles.feeType, { flex: 1, fontWeight: 'bold' }]}>Day</Text>
-            <Text style={[styles.feeValue, { flex: 1, fontWeight: 'bold' }]}>Hours</Text>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <LinearGradient
+        colors={['#000000', '#1a1a1a', '#2d2d2d']}
+        style={styles.gradient}
+      >
+        <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.headerContent}>
+              <Text style={styles.headerTitle}>{clinic.name}</Text>
+              <Text style={styles.headerSubtitle}>{i18n.t('clinicDetails') || 'Clinic Information'}</Text>
+            </View>
+            <TouchableOpacity style={styles.callButton} onPress={handleCall}>
+              <Ionicons name="call" size={24} color="#fff" />
+            </TouchableOpacity>
           </View>
-          {timings && typeof timings === 'object' ? (
-            Object.entries(timings).map(([day, value]) => {
-              if (
-                value &&
-                typeof value === 'object'
-              ) {
-                const from = (value as any).from || '';
-                const to = (value as any).to || '';
-                const isOff = (value as any).off;
 
-                return (
-                  <View key={day} style={styles.feeRow}>
-                    <Text style={[styles.feeType, { flex: 1 }]}>
-                      {day.charAt(0).toUpperCase() + day.slice(1)}
-                    </Text>
-                    <Text style={[styles.feeValue, { flex: 1 }]}>
-                      {isOff || (!from && !to) ? 'Closed' : `${from} – ${to}`}
-                    </Text>
-                  </View>
-                );
-              }
-              return null;
-            })
-          ) : (
-            <Text style={styles.sectionText}>{i18n.t('noTimings') || 'No timings available.'}</Text>
-          )}
-
-
-        </View>
-        {/* Doctors */}
-        <View style={styles.sectionBox}>
-          <Text style={styles.sectionTitle}>{i18n.t('doctors') || 'Doctors'}</Text>
-          {doctors.map((doc: any, idx: number) => (
-            <TouchableOpacity
-              key={idx}
-              style={styles.doctorCard}
-              onPress={() => handleReserve(doc.name)}
-              activeOpacity={0.7}
-            >
-              {doc.photoUri ? (
-                <Image source={{ uri: doc.photoUri }} style={{ width: 50, height: 50, borderRadius: 25, marginRight: 12 }} />
-              ) : (
-                <View style={styles.doctorIconPlaceholder}>
-                  <Ionicons name="person" size={24} color="#666" />
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.detailsCard}>
+              <View style={styles.detailRow}>
+                <View style={styles.detailIcon}>
+                  <Ionicons name="medical" size={20} color="#000" />
                 </View>
-              )}
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontWeight: 'bold', fontSize: 16 }}>{doc.name}</Text>
-                {doc.major ? <Text style={{ color: '#555' }}>{doc.major}</Text> : null}
-                {doc.description ? <Text style={{ fontSize: 14, color: '#777' }}>{doc.description}</Text> : null}
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>{i18n.t('clinicNameLabel') || 'Clinic Name'}</Text>
+                  <Text style={styles.detailValue}>{clinic.name}</Text>
+                </View>
               </View>
-              <Ionicons name="calendar-outline" size={20} color="#000" />
-            </TouchableOpacity>
-          ))}
-          {doctors.length === 0 && <Text style={styles.sectionText}>{i18n.t('noDoctors') || 'No doctors available.'}</Text>}
-        </View>
-        {/* Service Fees Table */}
-        <View style={styles.sectionBox}>
-          <Text style={styles.sectionTitle}>{i18n.t('serviceFees') || 'Service Fees'}</Text>
-          <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: '#eee', marginBottom: 6 }}>
-            <Text style={[styles.feeType, { flex: 1, fontWeight: 'bold' }]}>Service</Text>
-            <Text style={[styles.feeValue, { flex: 1, fontWeight: 'bold' }]}>Fee</Text>
-          </View>
-          {services.length > 0 ? services.map((s, idx) => (
-            <View key={idx} style={styles.feeRow}>
-              <Text style={[styles.feeType, { flex: 1 }]}>{i18n.t(s.name) !== s.name ? i18n.t(s.name) : s.name}</Text>
-              <Text style={[styles.feeValue, { flex: 1 }]}>{s.fee != null && String(s.fee).trim() !== '' ? `${String(s.fee)} EGP` : '—'}</Text>
-            </View>
-          )) : <Text style={styles.sectionText}>{i18n.t('noServices') || 'No services listed.'}</Text>}
-        </View>
-        {/* Contact */}
-        <View style={styles.sectionBox}>
-          <Text style={styles.sectionTitle}>{i18n.t('contact') || 'Contact'}</Text>
-          <Text style={styles.sectionText}>{clinic.phone}</Text>
-        </View>
 
-        {/* Date & Time selection for booking */}
-        <View style={styles.sectionBox}>
-          <Text style={styles.sectionTitle}>{i18n.t('preferredDateTime') || 'Preferred date & time'}</Text>
-          <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
-            <TouchableOpacity
-              style={styles.dateTimeChip}
-              onPress={() => setShowDatePicker(true)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="calendar-outline" size={18} color="#000" />
-              <Text style={styles.dateTimeChipText}>
-                {bookingDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.dateTimeChip}
-              onPress={() => setShowTimePicker(true)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="time-outline" size={18} color="#000" />
-              <Text style={styles.dateTimeChipText}>{bookingTime}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {showDatePicker && (
-          <Modal visible transparent animationType="fade">
-            <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setShowDatePicker(false)}>
-              <View style={styles.pickerCard} onStartShouldSetResponder={() => true}>
-                <Text style={styles.pickerTitle}>{i18n.t('selectDate') || 'Select date'}</Text>
-                <DateTimePicker
-                  value={bookingDate}
-                  mode="date"
-                  minimumDate={new Date()}
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  textColor="#000"
-                  onChange={(_, d) => {
-                    if (d) setBookingDate(d);
-                    if (Platform.OS === 'android') setShowDatePicker(false);
-                  }}
-                />
-                {Platform.OS === 'ios' && (
-                  <TouchableOpacity style={styles.pickerDone} onPress={() => setShowDatePicker(false)}>
-                    <Text style={styles.pickerDoneText}>{i18n.t('ok') || 'OK'}</Text>
-                  </TouchableOpacity>
-                )}
+              <View style={styles.detailRow}>
+                <View style={styles.detailIcon}>
+                  <Ionicons name="location" size={20} color="#000" />
+                </View>
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>{i18n.t('city') || 'City'}</Text>
+                  <Text style={styles.detailValue}>{clinic.city}</Text>
+                </View>
               </View>
-            </TouchableOpacity>
-          </Modal>
-        )}
-        {showTimePicker && (
-          <Modal visible transparent animationType="fade">
-            <TouchableOpacity style={styles.pickerOverlay} activeOpacity={1} onPress={() => setShowTimePicker(false)}>
-              <View style={styles.pickerCard} onStartShouldSetResponder={() => true}>
-                <Text style={styles.pickerTitle}>{i18n.t('selectTime') || 'Select time'}</Text>
-                <DateTimePicker
-                  value={(() => {
-                    const [h, m] = bookingTime.split(':').map(Number);
-                    const d = new Date(bookingDate);
-                    d.setHours(h, m || 0, 0, 0);
-                    return d;
-                  })()}
-                  mode="time"
-                  is24Hour={true}
-                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                  textColor="#000"
-                  onChange={(_, d) => {
-                    if (d) {
-                      const str = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-                      setBookingTime(str);
-                    }
-                    if (Platform.OS === 'android') setShowTimePicker(false);
-                  }}
-                />
-                {Platform.OS === 'ios' && (
-                  <TouchableOpacity style={styles.pickerDone} onPress={() => setShowTimePicker(false)}>
-                    <Text style={styles.pickerDoneText}>{i18n.t('ok') || 'OK'}</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </TouchableOpacity>
-          </Modal>
-        )}
 
-        <TouchableOpacity
-          style={[styles.reserveBtn, bookingLoading && styles.reserveBtnDisabled]}
-          onPress={() => handleReserve()}
-          disabled={bookingLoading}
-        >
-          {bookingLoading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.reserveBtnText}>{i18n.t('reserve') || 'Reserve'}</Text>
-          )}
-        </TouchableOpacity>
-
-        {/* Doctor Selection Modal */}
-        <Modal
-          visible={doctorModalVisible}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setDoctorModalVisible(false)}
-        >
-          <TouchableOpacity
-            style={styles.modalOverlay}
-            activeOpacity={1}
-            onPress={() => setDoctorModalVisible(false)}
-          >
-            <View style={styles.modalContent}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{i18n.t('selectDoctor') || 'Select Doctor'}</Text>
-                <TouchableOpacity onPress={() => setDoctorModalVisible(false)}>
-                  <Ionicons name="close" size={24} color="#000" />
-                </TouchableOpacity>
-              </View>
-              <ScrollView style={styles.modalScrollView}>
-                {doctors.map((doc: any, idx: number) => (
-                  <TouchableOpacity
-                    key={idx}
-                    style={styles.modalDoctorOption}
-                    onPress={() => {
-                      handleReserve(doc.name);
-                    }}
-                  >
-                    <View style={styles.modalDoctorInfo}>
-                      {doc.photoUri ? (
-                        <Image source={{ uri: doc.photoUri }} style={styles.modalDoctorPhoto} />
-                      ) : (
-                        <View style={styles.modalDoctorIconPlaceholder}>
-                          <Ionicons name="person" size={24} color="#666" />
-                        </View>
-                      )}
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.modalDoctorName}>{doc.name}</Text>
-                        {doc.major && <Text style={styles.modalDoctorMajor}>{doc.major}</Text>}
-                      </View>
+              {/* Services with Individual Pricing */}
+              <View style={styles.detailRow}>
+                <View style={styles.detailIcon}>
+                  <Ionicons name="cash" size={20} color="#000" />
+                </View>
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>{i18n.t('services') || 'Services & Fees'}</Text>
+                  {clinic.services.map((service: any, idx: number) => (
+                    <View key={idx} style={styles.serviceRow}>
+                      <Text style={styles.serviceName}>{service.name}</Text>
+                      <Text style={styles.serviceFee}>{service.fee} EGP</Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={20} color="#666" />
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.detailRow}>
+                <View style={styles.detailIcon}>
+                  <Ionicons name="document-text" size={20} color="#000" />
+                </View>
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>{i18n.t('description') || 'Description'}</Text>
+                  <Text style={styles.detailValue}>{clinic.desc}</Text>
+                </View>
+              </View>
+
+              <View style={styles.detailRow}>
+                <View style={styles.detailIcon}>
+                  <Ionicons name="map" size={20} color="#000" />
+                </View>
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>{i18n.t('address') || 'Address'}</Text>
+                  <Text style={styles.detailValue}>{clinic.address}</Text>
+                </View>
+              </View>
+
+              <View style={styles.detailRow}>
+                <View style={styles.detailIcon}>
+                  <Ionicons name="mail" size={20} color="#000" />
+                </View>
+                <View style={styles.detailContent}>
+                  <Text style={styles.detailLabel}>{i18n.t('email') || 'Email'}</Text>
+                  <Text style={styles.detailValue}>{clinic.email || 'N/A'}</Text>
+                </View>
+              </View>
             </View>
-          </TouchableOpacity>
-        </Modal>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backBtnText}>{i18n.t('close') || 'Close'}</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </View>
+
+            <View style={styles.hoursCard}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="time" size={24} color="#000" />
+                <Text style={styles.cardTitle}>{i18n.t('workingHours') || 'Working Hours'}</Text>
+              </View>
+              {clinic.workingHours.map((row: any, idx: number) => (
+                <View key={idx} style={styles.hoursRow}>
+                  <Text style={styles.hoursDay}>{row.day}</Text>
+                  <Text style={styles.hoursTime}>
+                    {row.off ? 'Closed' : `${row.from} - ${row.to}`}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            {/* Book appointment: service, doctor, comments, reserve */}
+            <View style={styles.bookingCard}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="calendar" size={24} color="#000" />
+                <Text style={styles.cardTitle}>{i18n.t('bookAppointment') || 'Book appointment'}</Text>
+              </View>
+
+              <Text style={styles.bookingLabel}>{i18n.t('selectService') || 'Select service'}</Text>
+              {clinic.services && clinic.services.length > 0 ? (
+                <View style={styles.serviceOptions}>
+                  {clinic.services.map((svc: any, idx: number) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[styles.serviceOption, selectedServiceIndex === idx && styles.serviceOptionSelected]}
+                      onPress={() => setSelectedServiceIndex(idx)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.serviceOptionText}>{svc.name}</Text>
+                      <Text style={styles.serviceOptionFee}>{svc.fee} EGP</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.bookingHint}>{i18n.t('noServicesListed') || 'No services listed'}</Text>
+              )}
+
+              <Text style={styles.bookingLabel}>{i18n.t('selectDoctor') || 'Select doctor'}</Text>
+              {clinic.doctors && clinic.doctors.length > 0 ? (
+                <View style={styles.serviceOptions}>
+                  {clinic.doctors.map((docName: string, idx: number) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[styles.serviceOption, selectedDoctorIndex === idx && styles.serviceOptionSelected]}
+                      onPress={() => setSelectedDoctorIndex(idx)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.serviceOptionText}>{docName}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.bookingHint}>{i18n.t('noDoctorsListed') || 'No doctors listed'}</Text>
+              )}
+
+              <Text style={styles.bookingLabel}>{i18n.t('additionalComments') || 'Additional comments (optional)'}</Text>
+              <TextInput
+                style={styles.commentsInput}
+                placeholder={i18n.t('commentsPlaceholder') || 'Any special requests or notes...'}
+                placeholderTextColor="#999"
+                value={bookingComments}
+                onChangeText={setBookingComments}
+                multiline
+                numberOfLines={3}
+              />
+
+              <TouchableOpacity
+                style={[styles.reserveButton, bookingLoading && styles.reserveButtonDisabled]}
+                onPress={() => handleReserve()}
+                disabled={bookingLoading || !clinic.services || clinic.services.length === 0}
+                activeOpacity={0.8}
+              >
+                {bookingLoading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.reserveButtonText}>{i18n.t('reserve') || 'Reserve'}</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.doctorsCard}>
+              <View style={styles.cardHeader}>
+                <Ionicons name="people" size={24} color="#000" />
+                <Text style={styles.cardTitle}>{i18n.t('doctors') || 'Doctors'}</Text>
+              </View>
+              {clinic.doctors && clinic.doctors.length > 0 ? (
+                clinic.doctors.map((doctor: string, idx: number) => (
+                  <View key={idx} style={styles.doctorButton}>
+                    <Ionicons name="person" size={20} color="#000" style={styles.doctorIcon} />
+                    <Text style={styles.doctorName}>{doctor}</Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={{ color: '#666', fontStyle: 'italic', padding: 8 }}>{i18n.t('noDoctorsListed') || 'No doctors listed'}</Text>
+              )}
+            </View>
+          </ScrollView>
+        </Animated.View>
+      </LinearGradient>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-
-  container: { flex: 1, backgroundColor: '#f8f8f8', padding: 0 },
-  headerBox: {
+  container: {
+    flex: 1,
+  },
+  gradient: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000',
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    paddingTop: 48,
-    paddingBottom: 32,
-    marginBottom: 18,
+    backgroundColor: '#1a1a1a',
   },
-  logo: {
-    width: 64,
-    height: 64,
-    resizeMode: 'contain',
-    marginBottom: 10,
-    tintColor: '#fff',
-    opacity: 0.7,
+  errorContainer: {
+    flex: 1,
   },
-  profilePhoto: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: '#fff',
-    backgroundColor: '#eee',
-    resizeMode: 'cover',
+  errorContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  favoriteBtn: {
-    position: 'absolute',
-    top: 48,
-    right: 24,
-    zIndex: 10,
-    padding: 8,
-  },
-  title: {
+  errorText: {
+    fontSize: 18,
     color: '#fff',
+    marginTop: 16,
+    marginBottom: 20,
+  },
+  backButtonLarge: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24,
+  },
+  backButtonText: {
+    color: '#000',
+    fontWeight: 'bold',
+  },
+  header: {
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    paddingHorizontal: 24,
+    paddingBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  headerContent: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  headerTitle: {
     fontSize: 28,
     fontWeight: 'bold',
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  city: {
-    color: '#eee',
-    fontSize: 17,
-    marginBottom: 0,
-    textAlign: 'center',
-  },
-  sectionBox: {
-    backgroundColor: '#fff',
-    borderRadius: 18,
-    marginHorizontal: 18,
-    marginBottom: 18,
-    padding: 18,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  sectionTitle: {
-    color: '#111',
-    fontWeight: 'bold',
-    fontSize: 18,
-    marginBottom: 6,
-  },
-  sectionText: {
-    color: '#333',
-    fontSize: 16,
-    marginBottom: 2,
-  },
-  feeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  feeType: {
-    color: '#222',
-    fontSize: 16,
-  },
-  feeValue: {
-    color: '#000',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  dateTimeChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 12,
-    gap: 8,
-  },
-  dateTimeChipText: {
-    fontSize: 15,
-    color: '#111',
-    fontWeight: '500',
-  },
-  pickerOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-  },
-  pickerCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 20,
-    minWidth: 280,
-  },
-  pickerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 12,
-    textAlign: 'center',
-    color: '#000',
-  },
-  pickerDone: {
-    marginTop: 16,
-    paddingVertical: 12,
-    backgroundColor: '#000',
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  pickerDoneText: {
     color: '#fff',
-    fontWeight: '600',
-    fontSize: 16,
+    marginBottom: 4,
+    textAlign: 'center',
   },
-  reserveBtn: {
-    backgroundColor: '#000',
+  headerSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+  },
+  callButton: {
+    width: 44,
+    height: 44,
     borderRadius: 22,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    alignItems: 'center',
-    marginHorizontal: 18,
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  reserveBtnDisabled: {
-    opacity: 0.6,
-  },
-  reserveBtnText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 18,
-  },
-  doctorCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    padding: 12,
-    backgroundColor: '#f8f8f8',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  doctorIconPlaceholder: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginLeft: 16,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  scrollContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 40,
   },
-  modalContent: {
+  detailsCard: {
     backgroundColor: '#fff',
-    borderRadius: 20,
-    width: '85%',
-    maxHeight: '70%',
-    overflow: 'hidden',
+    borderRadius: 24,
+    padding: 24,
+    marginTop: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
   },
-  modalHeader: {
+  detailRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#000',
-  },
-  modalScrollView: {
-    maxHeight: 400,
-  },
-  modalDoctorOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
+    alignItems: 'flex-start',
+    marginBottom: 20,
+    paddingBottom: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
-  modalDoctorInfo: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  modalDoctorPhoto: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginRight: 12,
-  },
-  modalDoctorIconPlaceholder: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#e0e0e0',
+  detailIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 16,
+  },
+  detailContent: {
+    flex: 1,
+  },
+  detailLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 4,
+  },
+  detailValue: {
+    fontSize: 16,
+    color: '#000',
+    lineHeight: 22,
+  },
+  hoursCard: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 24,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  doctorsCard: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 24,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+    marginLeft: 12,
+  },
+  hoursRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  hoursDay: {
+    fontSize: 16,
+    color: '#000',
+    fontWeight: '500',
+  },
+  hoursTime: {
+    fontSize: 16,
+    color: '#666',
+  },
+  doctorButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  doctorIcon: {
     marginRight: 12,
   },
-  modalDoctorName: {
+  doctorName: {
+    flex: 1,
     fontSize: 16,
     fontWeight: '600',
     color: '#000',
-    marginBottom: 4,
   },
-  modalDoctorMajor: {
+  serviceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  serviceName: {
+    fontSize: 16,
+    color: '#000',
+    flex: 1,
+  },
+  serviceFee: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#000',
+    marginLeft: 12,
+  },
+  bookingCard: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 24,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  bookingLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  serviceOptions: {
+    marginBottom: 12,
+  },
+  serviceOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f5f5f5',
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  serviceOptionSelected: {
+    backgroundColor: '#e0e0e0',
+    borderWidth: 2,
+    borderColor: '#000',
+  },
+  serviceOptionText: {
+    fontSize: 16,
+    color: '#000',
+    flex: 1,
+  },
+  serviceOptionFee: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
+  },
+  bookingHint: {
     fontSize: 14,
     color: '#666',
+    fontStyle: 'italic',
+    marginBottom: 12,
   },
-  backBtn: {
-    backgroundColor: '#fff',
-    borderRadius: 22,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    alignItems: 'center',
-    marginHorizontal: 18,
+  commentsInput: {
     borderWidth: 1,
-    borderColor: '#000',
-    marginBottom: 30,
-  },
-  backBtnText: {
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 15,
     color: '#000',
-    fontWeight: 'bold',
-    fontSize: 17,
+    minHeight: 80,
+    textAlignVertical: 'top',
   },
-  errorText: {
-    color: '#c00',
-    fontSize: 18,
-    textAlign: 'center',
-    marginTop: 60,
-    marginBottom: 20,
+  reserveButton: {
+    backgroundColor: '#000',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  reserveButtonDisabled: {
+    opacity: 0.6,
+  },
+  reserveButtonText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: 'bold',
   },
 });

@@ -287,7 +287,7 @@ export default function AdminDashboard() {
                 </View>
                 <View style={styles.navRow}>
                     <TouchableOpacity 
-                        style={[styles.navBtn, styles.navBtnFull]}
+                        style={styles.navBtn}
                         onPress={() => router.push('/(admin)/my-media')}
                         activeOpacity={0.7}
                     >
@@ -296,6 +296,17 @@ export default function AdminDashboard() {
                         </View>
                         <Text style={styles.navText}>My Media</Text>
                     </TouchableOpacity>
+                    <TouchableOpacity 
+                        style={styles.navBtn}
+                        onPress={() => router.push('/(admin)/see-media')}
+                        activeOpacity={0.7}
+                    >
+                        <View style={styles.navIconContainer}>
+                            <Ionicons name="images-outline" size={22} color="#fff" />
+                        </View>
+                        <Text style={styles.navText}>All Media</Text>
+                    </TouchableOpacity>
+                    <View style={[styles.navBtn, { backgroundColor: 'transparent', elevation: 0, shadowOpacity: 0 }]} />
                 </View>
             </View>
         </ScrollView>

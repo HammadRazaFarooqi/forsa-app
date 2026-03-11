@@ -1,465 +1,479 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, FlatList, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useEffect, useState } from 'react';
+import { FlatList, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
+import { db } from '../lib/firebase';
+import { collection, query, getDocs } from 'firebase/firestore';
 
+const cities = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>).map(([key, label]) => ({ key, label }));
 
-
-// City logic copied from agent-search
-const cities = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>);
-const cityLabels = i18n.t('cities', { returnObjects: true }) as Record<string, string>;
-const ageGroups = Array.from({ length: 10 }, (_, i) => (7 + i).toString());
-
-import { Picker } from '@react-native-picker/picker';
-
-export default function AcademySearchScreen() {
-  const router = useRouter();
-  const { openMenu } = useHamburgerMenu();
-  const [search, setSearch] = useState('');
-  const [city, setCity] = useState('');
-  const [age, setAge] = useState('');
-
-// Define Academy type
-type Academy = {
+interface Academy {
   id: string;
   name: string;
+  academyName: string;
   city: string;
+  address: string;
   description: string;
-  fees: Record<string, number>;
-};
+  fees: any;
+  displayFee: number;
+  role: string;
+  [key: string]: any;
+}
 
-const [results, setResults] = useState<Academy[]>([]);
-const [allAcademies, setAllAcademies] = useState<Academy[]>([]);
-const [dropdownOpen, setDropdownOpen] = useState(false);
-const [loading, setLoading] = useState(false);
-const [favorites, setFavorites] = useState<string[]>([]);
-const favoriteAnims = useRef(new Map<string, Animated.Value>()).current;
-const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
-
+export default function AcademySearchScreen() {
+  const { openMenu } = useHamburgerMenu();
+  const [name, setName] = useState('');
+  const [city, setCity] = useState('');
   const [cityModal, setCityModal] = useState(false);
-const [selectedAcademy, setSelectedAcademy] = useState<Academy | null>(null);
-// Show modal for selected academy
-const handleShowModal = (academy: Academy) => {
-  setSelectedAcademy(academy);
-  setModalVisible(true);
-};
-  const [modalVisible, setModalVisible] = useState(false);
-
+  const [price, setPrice] = useState('');
+  const [academies, setAcademies] = useState<Academy[]>([]);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
-    const fetchAcademies = async () => {
-    setLoading(true);
-      try {
-        const academiesRef = collection(db, 'academies');
-        const querySnapshot = await getDocs(academiesRef);
-        const academies = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          name: doc.data().academyName || '',
-          city: doc.data().city || '',
-          description: doc.data().description || '',
-          fees: doc.data().fees || {},
-          ...doc.data()
-        })) as Academy[];
-        setResults(academies);
-        setAllAcademies(academies);
-      } catch (err) {
-        console.error('❌ Failed to fetch academies:', err);
-        setResults([]);
-        setAllAcademies([]);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchAcademies();
-    // Load favorites from local storage
-    (async () => {
-      try {
-        const stored = await AsyncStorage.getItem('academyFavorites');
-        if (stored) setFavorites(JSON.parse(stored));
-      } catch {}
-    })();
   }, []);
 
-const handleSearch = () => {
-  // If no filters, show all
-  if (!search && !city && !age) {
-    setResults(allAcademies);
-    return;
-  }
-  setLoading(true);
-  // Client-side filtering
-  const filtered = allAcademies.filter((a: Academy) =>
-    (!search || a.name.toLowerCase().includes(search.toLowerCase()) || 
-     (a.academyName && a.academyName.toLowerCase().includes(search.toLowerCase()))) &&
-        (!city || a.city.toLowerCase() === city.toLowerCase()) &&
-        (!age || (a.fees && Object.keys(a.fees).includes(age)))
-      );
-      setResults(filtered);
-  setLoading(false);
-};
+  const fetchAcademies = async () => {
+    try {
+      setLoading(true);
 
-const handleClearFilters = () => {
-  setSearch('');
-  setCity('');
-  setAge('');
-  setShowFavoritesOnly(false);
-  setResults(allAcademies);
-};
+      const academyList: Academy[] = [];
 
-const getFavoriteAnimation = (academyId: string) => {
-  if (!favoriteAnims.has(academyId)) {
-    favoriteAnims.set(academyId, new Animated.Value(1));
-  }
-  return favoriteAnims.get(academyId)!;
-};
+      try {
+        const academiesRef = collection(db, 'academies');
+        const q = query(academiesRef);
+        const querySnapshot = await getDocs(q);
 
-const toggleFavorite = async (academyId: string) => {
-  const newFavorites = favorites.includes(academyId)
-    ? favorites.filter((id) => id !== academyId)
-    : [...favorites, academyId];
-  setFavorites(newFavorites);
-  await AsyncStorage.setItem('academyFavorites', JSON.stringify(newFavorites));
-  const anim = getFavoriteAnimation(academyId);
-  Animated.sequence([
-    Animated.timing(anim, { toValue: 1.5, duration: 150, useNativeDriver: true }),
-    Animated.timing(anim, { toValue: 1, duration: 150, useNativeDriver: true }),
-  ]).start();
-};
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
 
+          academyList.push({
+            ...data,
+            id: doc.id,
+            name: data.academyName || 'Unnamed Academy',
+            academyName: data.academyName || 'Unnamed Academy',
+            city: data.city || '',
+            address: data.address || '',
+            description: data.description || 'No description available',
+            fees: data.fees || {},
+            displayFee: typeof data.fees === 'object' ? Object.values(data.fees)[0] as number : (data.fees || 0),
+            role: data.role || 'academy',
+          });
+        });
+      } catch (error) {
+        console.error('Error fetching from academies collection:', error);
+      }
 
-  // Skeleton loader
-  const AcademyCardSkeleton = () => {
-    const pulseAnim = useRef(new Animated.Value(1)).current;
-    useEffect(() => {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 0.7, duration: 800, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-        ])
-      ).start();
-    }, [pulseAnim]);
-    return (
-      <Animated.View style={[styles.card, styles.cardBlack, { maxWidth: 340, width: '95%', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', padding: 12, opacity: pulseAnim, marginBottom: 16 }]}> 
-        <View style={{ width: 54, height: 54, borderRadius: 27, marginRight: 14, backgroundColor: '#333' }} />
-        <View style={{ flex: 1 }}>
-          <View style={{ height: 20, backgroundColor: '#333', borderRadius: 4, marginBottom: 6, width: '70%' }} />
-          <View style={{ height: 16, backgroundColor: '#333', borderRadius: 4, marginBottom: 8, width: '40%' }} />
-          <View style={{ height: 14, backgroundColor: '#333', borderRadius: 4, marginBottom: 4, width: '90%' }} />
-          <View style={{ height: 14, backgroundColor: '#333', borderRadius: 4, width: '80%' }} />
-        </View>
-      </Animated.View>
-    );
+      setAcademies(academyList);
+    } catch (error) {
+      console.error('Error in fetchAcademies:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const displayedResults = React.useMemo(() => {
-    if (showFavoritesOnly) {
-      return results.filter(a => favorites.includes(a.id));
-    }
-    return results;
-  }, [results, showFavoritesOnly, favorites]);
+  const filtered = academies.filter(a =>
+    (!name || a.academyName.toLowerCase().includes(name.toLowerCase())) &&
+    (!city || a.city === city) &&
+    (!price || a.displayFee <= parseInt(price))
+  );
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
-      <HamburgerMenu />
-      <View style={styles.headerContainer}>
-        <TouchableOpacity style={styles.menuButton} onPress={openMenu} activeOpacity={0.8}>
-          <View style={styles.menuButtonInner}>
-            <View style={styles.menuLine} />
-            <View style={styles.menuLine} />
-            <View style={styles.menuLine} />
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <LinearGradient
+        colors={['#000000', '#1a1a1a', '#2d2d2d']}
+        style={styles.gradient}
+      >
+        <View style={{ flex: 1 }}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.menuButton} onPress={openMenu}>
+              <Ionicons name="menu" size={24} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.headerContent}>
+              <Text style={styles.headerTitle}>{i18n.t('searchAcademies') || 'Search Academies'}</Text>
+              <Text style={styles.headerSubtitle}>{i18n.t('findPerfectAcademy') || 'Find the perfect academy for your child'}</Text>
+            </View>
           </View>
-        </TouchableOpacity>
-        <View style={styles.titleContainer}>
-          <Text style={styles.titleText}>{i18n.t('searchAcademies')}</Text>
-        </View>
-      </View>
-      {/* ...existing code... */}
-      <FlatList
-        data={loading ? [] : displayedResults}
-        keyExtractor={item => item.id}
-        ListHeaderComponent={
-          <View style={{ backgroundColor: '#000' }}>
-            {/* Filter Dropdown and Favourites/Sort Buttons */}
-            <View style={[styles.filterBoxSticky, { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 0, margin: 24, marginTop: 16 }]}> 
-              {/* Filter Dropdown Button */}
-              <TouchableOpacity
-                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#f4f4f4', borderRadius: 28, paddingVertical: 16, paddingHorizontal: 24, borderWidth: dropdownOpen ? 2 : 1, borderColor: dropdownOpen ? '#000' : '#f4f4f4', minHeight: 56, elevation: dropdownOpen ? 2 : 0 }}
-                onPress={() => setDropdownOpen((prev) => !prev)}
-                activeOpacity={0.8}
-              >
-                <Text style={{ fontSize: 18, color: '#000', flex: 1, fontWeight: 'bold' }}>{i18n.t('filters') || 'Filters'}</Text>
-                <Text style={{ fontSize: 20, color: '#888', marginLeft: 8 }}>{dropdownOpen ? '▲' : '▼'}</Text>
-              </TouchableOpacity>
-              {/* Favorites Button */}
-              <TouchableOpacity
-                style={{ backgroundColor: showFavoritesOnly ? '#ffd700' : '#f4f4f4', borderRadius: 28, padding: 16, alignItems: 'center', justifyContent: 'center', minHeight: 56, borderWidth: 1, borderColor: showFavoritesOnly ? '#e6c200' : '#f4f4f4' }}
-                onPress={() => setShowFavoritesOnly(prev => !prev)}
-                activeOpacity={0.8}
-              >
-                <Text style={{ fontSize: 24, color: showFavoritesOnly ? '#fff' : '#aaa' }}>★</Text>
+
+          <HamburgerMenu />
+
+          <ScrollView
+            style={styles.filtersCard}
+            contentContainerStyle={styles.filtersCardContent}
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled={true}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.filterRow}>
+              <View style={styles.filterInputWrapper}>
+                <Ionicons name="search-outline" size={20} color="#999" style={styles.filterIcon} />
+                <TextInput
+                  style={styles.filterInput}
+                  value={name}
+                  onChangeText={setName}
+                  placeholder={i18n.t('academyNameLabel') || 'Academy Name'}
+                  placeholderTextColor="#999"
+                />
+              </View>
+            </View>
+
+            <View style={styles.filterRow}>
+              <TouchableOpacity style={styles.filterInputWrapper} onPress={() => setCityModal(true)}>
+                <Ionicons name="location-outline" size={20} color="#999" style={styles.filterIcon} />
+                <Text style={[styles.filterText, !city && styles.filterPlaceholder]}>
+                  {city ? cities.find(c => c.key === city)?.label || city : i18n.t('city')}
+                </Text>
+                <Ionicons name="chevron-down" size={20} color="#999" />
               </TouchableOpacity>
             </View>
-            {/* Filter Dropdown Content */}
-            {dropdownOpen && (
-              <View style={{
-                backgroundColor: '#fff',
-                borderRadius: 22,
-                padding: 0,
-                shadowColor: '#000',
-                shadowOpacity: 0.12,
-                shadowRadius: 16,
-                elevation: 20,
-                zIndex: 2001,
-                maxHeight: 420,
-                marginHorizontal: 24,
-                alignSelf: 'center',
-              }}>
-                <ScrollView style={{ padding: 24 }} contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
-                  {/* Academy Name */}
-                  <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>{i18n.t('academy_name') || 'Academy Name'}</Text>
-                  <TextInput
-                    style={[styles.pillInput, { marginBottom: 16 }]}
-                    placeholder={i18n.t('academyNamePlaceholder')}
-                    value={search}
-                    onChangeText={setSearch}
-                    placeholderTextColor="#888"
-                  />
-                  {/* City Picker */}
-                  <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>{i18n.t('city') || 'City'}</Text>
-                  <View style={{ borderRadius: 28, backgroundColor: '#f4f4f4', marginBottom: 16 }}>
-                    <Picker
-                      selectedValue={city}
-                      onValueChange={setCity}
-                      style={{ color: '#000', fontSize: 18, width: '100%' }}
-                      mode="dropdown"
-                    >
-                      <Picker.Item label={i18n.t('cityPlaceholder')} value="" color="#888" />
-                      {cities.map(([key, label]) => (
-                        <Picker.Item key={key} label={label} value={key} color="#000" />
-                      ))}
-                    </Picker>
+
+            <Modal visible={cityModal} transparent animationType="fade" onRequestClose={() => setCityModal(false)}>
+              <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setCityModal(false)}>
+                <View style={styles.modalContent}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>{i18n.t('selectCity')}</Text>
+                    <TouchableOpacity onPress={() => setCityModal(false)}>
+                      <Ionicons name="close" size={24} color="#000" />
+                    </TouchableOpacity>
                   </View>
-                  {/* Age Filter */}
-                  <Text style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 8 }}>{i18n.t('ageGroup') || 'Age Group'}</Text>
-                  <View style={{ borderRadius: 28, backgroundColor: '#f4f4f4', marginBottom: 16 }}>
-                    <Picker
-                      selectedValue={age}
-                      onValueChange={setAge}
-                      style={{ color: '#000', fontSize: 18, width: '100%' }}
-                      mode="dropdown"
-                    >
-                      <Picker.Item label={i18n.t('selectAgeGroup') || 'Select Age Group'} value="" color="#888" />
-                      {ageGroups.map((a) => (
-                        <Picker.Item key={a} label={a} value={a} color="#000" />
-                      ))}
-                    </Picker>
-                  </View>
-                  <TouchableOpacity style={[styles.searchBtn, { marginTop: 8 }]} onPress={() => { setDropdownOpen(false); handleSearch(); }}>
-                    <Text style={styles.searchBtnText}>{i18n.t('search')}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.searchBtn, { marginTop: 16, backgroundColor: '#e74c3c' }]}
-                    onPress={() => { handleClearFilters(); setDropdownOpen(false); }}>
-                    <Text style={styles.searchBtnText}>{i18n.t('clearFilters') || 'Clear Filters'}</Text>
-                  </TouchableOpacity>
-                </ScrollView>
-              </View>
-            )}
-          </View>
-        }
-        renderItem={({ item }) => (
-          <TouchableOpacity onPress={() => router.push({ pathname: '/academy-details', params: { academy: JSON.stringify(item) } })}>
-            <View style={[styles.card, styles.cardBlack, { maxWidth: 340, width: '95%', alignSelf: 'center', flexDirection: 'row', alignItems: 'center', padding: 12 }]}> 
-              {/* Profile Photo */}
-              <Image source={require('../assets/logo.png')} style={{ width: 54, height: 54, borderRadius: 27, marginRight: 14, backgroundColor: '#eee', borderWidth: 1, borderColor: '#fff', tintColor: '#fff', opacity: 0.7 }} />
-              <TouchableOpacity
-                style={{ position: 'absolute', top: -4, right: -4, zIndex: 1, padding: 8 }}
-                onPress={(e) => { e.stopPropagation(); toggleFavorite(item.id); }}
-              >
-                <Animated.Text style={{ fontSize: 28, color: favorites.includes(item.id) ? '#ffd700' : '#aaa', transform: [{ scale: getFavoriteAnimation(item.id) }] }}>
-                  ★
-                </Animated.Text>
-              </TouchableOpacity>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.cardTitle, { color: '#fff' }]}>{item.name}</Text>
-                <Text style={[styles.cardCity, { color: '#bbb' }]}>{cityLabels[item.city] || item.city}</Text>
-                <Text style={[styles.cardDesc, { color: '#eee' }]}>{item.description}</Text>
-                {/* Fees summary */}
-                {item.fees && (
-                  <View style={{ marginTop: 4 }}>
-                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>{i18n.t('monthlyFees') || 'Monthly Fees (per age group):'}</Text>
-                    {Object.entries(item.fees).map(([age, fee]) => (
-                      <View key={age} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-                        <Text style={{ color: '#fff', fontSize: 14 }}>{age}</Text>
-                        <Text style={{ color: '#fff', fontSize: 14 }}>{String(fee)} EGP</Text>
-                      </View>
+                  <ScrollView style={styles.modalScrollView}>
+                    {cities.map((item) => (
+                      <TouchableOpacity
+                        key={item.key}
+                        style={[styles.modalOption, city === item.key && styles.modalOptionSelected]}
+                        onPress={() => {
+                          setCity(item.key);
+                          setCityModal(false);
+                        }}
+                      >
+                        <Text style={[styles.modalOptionText, city === item.key && styles.modalOptionTextSelected]}>
+                          {item.label}
+                        </Text>
+                        {city === item.key && <Ionicons name="checkmark" size={20} color="#fff" />}
+                      </TouchableOpacity>
                     ))}
-                  </View>
-                )}
+                  </ScrollView>
+                </View>
+              </TouchableOpacity>
+            </Modal>
+
+            <View style={styles.filterRow}>
+              <View style={styles.filterInputWrapper}>
+                <Ionicons name="cash-outline" size={20} color="#999" style={styles.filterIcon} />
+                <TextInput
+                  style={styles.filterInput}
+                  value={price}
+                  onChangeText={setPrice}
+                  placeholder={i18n.t('maxPrice') || 'Max Price'}
+                  placeholderTextColor="#999"
+                  keyboardType="numeric"
+                />
               </View>
             </View>
-          </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          loading ? (
-            <View style={{ paddingTop: 20 }}>
-              <AcademyCardSkeleton />
-              <AcademyCardSkeleton />
-              <AcademyCardSkeleton />
+          </ScrollView>
+
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#fff" />
+              <Text style={styles.loadingText}>Loading academies...</Text>
             </View>
           ) : (
-            <Text style={styles.empty}>{i18n.t('noResults')}</Text>
-          )
-        }
-        style={{ marginTop: 0 }}
-        contentContainerStyle={{ paddingBottom: 20 }}
-      />
-      {/* Modal removed: navigation is now direct on card press */}
-      <Image source={require('../assets/logo.png')} style={styles.forsaLogo} />
-    </View>
+            <FlatList
+              data={filtered}
+              keyExtractor={item => item.id}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.card}
+                  onPress={() => router.push({ pathname: '/academy-details', params: { academy: JSON.stringify(item) } })}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.cardHeader}>
+                    <View style={styles.cardIcon}>
+                      <Ionicons name="school" size={24} color="#000" />
+                    </View>
+                    <View style={styles.cardHeaderText}>
+                      <Text style={styles.cardTitle}>{item.academyName}</Text>
+                      <View style={styles.cardLocation}>
+                        <Ionicons name="location" size={14} color="#666" />
+                        <Text style={styles.cardCity}>{item.city}</Text>
+                      </View>
+                    </View>
+                  </View>
+                  <Text style={styles.cardDesc}>{item.description}</Text>
+                  <View style={styles.cardFooter}>
+                    <View style={styles.cardAge}>
+                      <Ionicons name="location-outline" size={16} color="#666" />
+                      <Text style={styles.cardAgeText}>{item.address || 'No address'}</Text>
+                    </View>
+                    <Text style={styles.cardPrice}>{i18n.t('price')}: {item.displayFee} EGP</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Ionicons name="school-outline" size={64} color="#666" />
+                  <Text style={styles.emptyText}>{i18n.t('noAcademiesFound') || 'No academies found'}</Text>
+                  <Text style={styles.emptySubtext}>Try adjusting your filters</Text>
+                </View>
+              }
+            />
+          )}
+        </View>
+      </LinearGradient>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000', padding: 0 },
-  headerContainer: {
-    backgroundColor: '#000',
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    paddingTop: 60,
-    paddingBottom: 32,
+  container: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  gradient: {
+    flex: 1,
+  },
+  header: {
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
     paddingHorizontal: 24,
+    paddingBottom: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 0,
-    zIndex: 10,
-    width: '100%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
   },
   menuButton: {
     width: 44,
     height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
-    zIndex: 100,
-  },
-  menuButtonInner: {
-    width: 44,
-    height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: '#000',
-  },
-  menuLine: {
-    width: 28,
-    height: 4,
-    backgroundColor: '#000',
-    marginVertical: 3,
-    borderRadius: 2,
-  },
-  titleContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: -44, // Negative margin to center title while keeping menu button on left
-    paddingHorizontal: 44, // Add padding to ensure title doesn't overlap with menu
-  },
-  titleBar: {
-    backgroundColor: '#000',
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    paddingTop: 60,
-    paddingBottom: 32,
-    alignItems: 'center',
-    marginBottom: 18,
-    zIndex: 10,
-    width: '100%',
-  },
-  titleText: {
-    color: '#fff',
-    fontSize: 32,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-    alignItems: 'center',
-    textAlign: 'center', // Center the text horizontally
-  },
-  filterBox: { backgroundColor: '#fff', borderRadius: 22, padding: 24, margin: 24, marginTop: 0, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, elevation: 2, flexDirection: 'column', gap: 18, alignItems: 'stretch' },
-  filterBoxSticky: {
-    backgroundColor: '#fff',
-    borderRadius: 22,
-    padding: 24,
-    margin: 24,
-    marginTop: 0,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 2,
-    flexDirection: 'column',
-    gap: 18,
-    alignItems: 'stretch',
-  },
-  pillInput: { minWidth: 220, borderRadius: 28, backgroundColor: '#f4f4f4', paddingVertical: 18, paddingHorizontal: 28, fontSize: 20, color: '#000', borderWidth: 0, marginBottom: 0, marginTop: 0, marginHorizontal: 0 },
-  searchBtn: { backgroundColor: '#000', borderRadius: 28, paddingVertical: 18, paddingHorizontal: 36, alignItems: 'center', justifyContent: 'center', marginTop: 10, minWidth: 120 },
-  searchBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
-  card: { backgroundColor: '#fff', borderRadius: 14, padding: 18, marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, elevation: 2 },
-  cardBlack: { backgroundColor: '#111', borderColor: '#000', borderWidth: 1 },
-  cardTitle: { fontWeight: 'bold', fontSize: 19, color: '#000', marginBottom: 4 },
-  cardCity: { color: '#888', fontSize: 15, marginBottom: 2 },
-  cardDesc: { color: '#222', fontSize: 15, marginTop: 4 },
-  empty: { color: '#888', textAlign: 'center', marginTop: 40 },
-  modalOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.18)' },
-  modalBox: { position: 'absolute', top: 160, left: 30, right: 30, backgroundColor: '#fff', borderRadius: 14, padding: 10, maxHeight: 320, zIndex: 100, elevation: 10 },
-  modalItem: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#eee' },
-  forsaLogo: {
-    position: 'absolute',
-    bottom: 18,
-    left: '50%',
-    transform: [{ translateX: -24 }],
-    width: 48,
-    height: 48,
-    opacity: 0.22,
-    tintColor: '#000',
     zIndex: 1,
   },
-  reserveBtn: {
+  headerContent: {
+    flex: 1,
+    alignItems: 'center',
+    marginLeft: -44,
+    paddingHorizontal: 44,
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.7)',
+    textAlign: 'center',
+  },
+  filtersCard: {
     backgroundColor: '#fff',
-    borderRadius: 22,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
+    borderRadius: 20,
+    marginHorizontal: 24,
+    marginTop: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    maxHeight: 300,
+  },
+  filtersCardContent: {
+    padding: 20,
+  },
+  filterRow: {
+    marginBottom: 12,
+  },
+  filterInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#f5f5f5',
+    paddingHorizontal: 16,
+    minHeight: 56,
+  },
+  filterIcon: {
+    marginRight: 12,
+  },
+  filterInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#000',
+    paddingVertical: 16,
+  },
+  filterText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#000',
+    paddingVertical: 16,
+  },
+  filterPlaceholder: {
+    color: '#999',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '90%',
+    maxHeight: '70%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  modalScrollView: {
+    maxHeight: 400,
+  },
+  modalOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  modalOptionSelected: {
+    backgroundColor: '#000',
+  },
+  modalOptionText: {
+    fontSize: 16,
+    color: '#000',
+  },
+  modalOptionTextSelected: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#fff',
+    marginTop: 16,
+  },
+  listContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  cardHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
-    marginTop: 4,
   },
-  reserveBtnText: {
-    color: '#000',
-    fontWeight: 'bold',
-    fontSize: 17,
-  },
-  closeBtn: {
-    backgroundColor: 'transparent',
-    borderRadius: 22,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
+  cardIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#fff',
+    marginRight: 12,
   },
-  closeBtnText: {
-    color: '#fff',
+  cardHeaderText: {
+    flex: 1,
+  },
+  cardTitle: {
+    fontSize: 18,
     fontWeight: 'bold',
-    fontSize: 17,
+    color: '#000',
+    marginBottom: 4,
+  },
+  cardLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cardCity: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 4,
+  },
+  cardDesc: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  cardAge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  cardAgeText: {
+    fontSize: 14,
+    color: '#666',
+    marginLeft: 4,
+  },
+  cardPrice: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 16,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.6)',
+    marginTop: 8,
   },
 });
