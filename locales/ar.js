@@ -853,4 +853,6 @@ export default {
   comingSoon: "قريباً",
   comingSoonMessage: "هذه الميزة قريباً!",
   ok: "موافق",
+  about: "معلومات عنا",
+  pleaseSetPriceFirst: "يرجى تحديد رسوم لفئة عمرية لجدولتها.",
 };

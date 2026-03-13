@@ -284,7 +284,6 @@ export default function ClinicSearchScreen() {
                       <Ionicons name="list" size={16} color="#666" />
                       <Text style={styles.cardServicesText}>{item.services.length} {i18n.t('services') || 'services'}</Text>
                     </View>
-                    <Text style={styles.cardPrice}>{i18n.t('price')}: {item.minPrice > 0 ? `${item.minPrice} EGP` : 'N/A'}</Text>
                   </View>
                 </TouchableOpacity>
               )}

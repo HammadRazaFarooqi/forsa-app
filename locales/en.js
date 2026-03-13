@@ -797,4 +797,6 @@ export default {
   comingSoon: "Coming Soon",
   comingSoonMessage: "This feature is coming soon!",
   ok: "OK",
+  about: "About",
+  pleaseSetPriceFirst: "Please set a fee for an age group to schedule it.",
 };

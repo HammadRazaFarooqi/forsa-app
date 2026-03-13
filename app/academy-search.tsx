@@ -213,7 +213,6 @@ export default function AcademySearchScreen() {
                       <Ionicons name="location-outline" size={16} color="#666" />
                       <Text style={styles.cardAgeText}>{item.address || 'No address'}</Text>
                     </View>
-                    <Text style={styles.cardPrice}>{i18n.t('price')}: {item.displayFee} EGP</Text>
                   </View>
                 </TouchableOpacity>
               )}

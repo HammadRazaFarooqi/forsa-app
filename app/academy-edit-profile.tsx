@@ -3,7 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
@@ -58,6 +58,8 @@ export default function AcademyEditProfileScreen({ academyName: academyNameProp 
   const { width: screenWidth } = useWindowDimensions();
   const isNarrow = screenWidth < 380;
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const [showCityModal, setShowCityModal] = useState(false);
+  const cityOptions = Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>).map(([key, label]) => ({ key, label }));
 
   React.useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -115,13 +117,24 @@ export default function AcademyEditProfileScreen({ academyName: academyNameProp 
   const handleSaveAge = (age: string) => {
     if (newPrice.trim()) {
       setPrices({ ...prices, [age]: newPrice });
-      setSelected([...selected, age]);
+      if (!selected.includes(age)) {
+        setSelected([...selected, age]);
+      }
       setSettingAge(null);
       setNewPrice('');
     }
   };
   const handleEditPrice = (age: string, value: string) => {
     setPrices({ ...prices, [age]: value });
+  };
+  const handleRemoveAge = (age: string) => {
+    const newPrices = { ...prices };
+    delete newPrices[age];
+    setPrices(newPrices);
+    setSelected(prev => prev.filter(a => a !== age));
+    const newSchedule = { ...schedule };
+    delete newSchedule[age];
+    setSchedule(newSchedule);
   };
 
   const handlePickPhoto = async () => {
@@ -288,16 +301,45 @@ export default function AcademyEditProfileScreen({ academyName: academyNameProp 
               {/* City */}
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>{i18n.t('city') || 'City'}</Text>
-                <View style={styles.inputWrapper}>
+                <TouchableOpacity
+                  style={[styles.inputWrapper, styles.cityPickerWrapper]}
+                  onPress={() => setShowCityModal(true)}
+                >
                   <Ionicons name="location-outline" size={20} color="#999" style={styles.inputIcon} />
-                  <TextInput
-                    style={styles.input}
-                    value={city}
-                    onChangeText={setCity}
-                    placeholder={i18n.t('city') || 'City'}
-                    placeholderTextColor="#999"
-                  />
-                </View>
+                  <Text style={[styles.cityText, !city && styles.cityPlaceholder]}>
+                    {city ? (cityOptions.find(c => c.key === city)?.label || city) : i18n.t('selectCity') || 'Select City'}
+                  </Text>
+                  <Ionicons name="chevron-down" size={20} color="#999" />
+                </TouchableOpacity>
+                <Modal visible={showCityModal} transparent animationType="fade" onRequestClose={() => setShowCityModal(false)}>
+                  <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowCityModal(false)}>
+                    <View style={styles.modalContent}>
+                      <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>{i18n.t('selectCity')}</Text>
+                        <TouchableOpacity onPress={() => setShowCityModal(false)}>
+                          <Ionicons name="close" size={24} color="#000" />
+                        </TouchableOpacity>
+                      </View>
+                      <ScrollView style={styles.modalScrollView}>
+                        {cityOptions.map(option => (
+                          <TouchableOpacity
+                            key={option.key}
+                            style={[styles.cityOption, city === option.key && styles.cityOptionSelected]}
+                            onPress={() => {
+                              setCity(option.key);
+                              setShowCityModal(false);
+                            }}
+                          >
+                            <Text style={[styles.cityOptionText, city === option.key && styles.cityOptionTextSelected]}>
+                              {option.label}
+                            </Text>
+                            {city === option.key && <Ionicons name="checkmark" size={20} color="#fff" />}
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  </TouchableOpacity>
+                </Modal>
               </View>
 
               {/* Description */}
@@ -390,27 +432,35 @@ export default function AcademyEditProfileScreen({ academyName: academyNameProp 
           <View key={age} style={[styles.bubble, selected.includes(age) && styles.bubbleSelected]}>
             <Text style={[styles.bubbleText, selected.includes(age) && styles.bubbleTextSelected]}>{age}</Text>
             {selected.includes(age) ? (
-              <TextInput
-                style={styles.priceInput}
-                value={prices[age] || ''}
-                onChangeText={v => handleEditPrice(age, v)}
-                keyboardType="numeric"
-                placeholder={i18n.t('feePlaceholder') || 'Fee'}
-                          placeholderTextColor="#999"
-              />
+              <View style={styles.setRow}>
+                <TextInput
+                  style={[styles.priceInput, { marginTop: 0, flex: 1, minWidth: 40 }]}
+                  value={prices[age] || ''}
+                  onChangeText={v => handleEditPrice(age, v)}
+                  keyboardType="numeric"
+                  placeholder={i18n.t('feePlaceholder') || 'Fee'}
+                  placeholderTextColor="#999"
+                />
+                <TouchableOpacity onPress={() => handleRemoveAge(age)} style={{ marginLeft: 4 }}>
+                  <Ionicons name="close-circle" size={24} color="#ff3b30" />
+                </TouchableOpacity>
+              </View>
             ) : settingAge === age ? (
               <View style={styles.setRow}>
                 <TextInput
-                  style={styles.priceInput}
+                  style={[styles.priceInput, { marginTop: 0, flex: 1, minWidth: 40 }]}
                   value={newPrice}
                   onChangeText={setNewPrice}
                   keyboardType="numeric"
                   placeholder={i18n.t('feePlaceholder') || 'Fee'}
-                            placeholderTextColor="#999"
+                  placeholderTextColor="#999"
                   autoFocus
                 />
                 <TouchableOpacity style={styles.setBtn} onPress={() => handleSaveAge(age)}>
                   <Text style={styles.setBtnText}>{i18n.t('save') || 'Save'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.setBtn} onPress={() => { setSettingAge(null); setNewPrice(''); }}>
+                  <Text style={styles.setBtnText}>{i18n.t('cancel') || 'Cancel'}</Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -421,6 +471,83 @@ export default function AcademyEditProfileScreen({ academyName: academyNameProp 
           </View>
         ))}
       </View>
+              </View>
+
+              {/* Schedule (day + time) per age group - only shown for selected ages with a set fee */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>{i18n.t('schedulePerAgeGroup') || 'Training schedule (day & time per age group)'}</Text>
+                {selected.length === 0 ? (
+                  <Text style={styles.placeholderText}>{i18n.t('pleaseSetPriceFirst') || 'Please set a fee for an age group to schedule it.'}</Text>
+                ) : (
+                  [...selected].sort((a, b) => parseInt(a) - parseInt(b)).map((age) => (
+                    <View
+                      key={age}
+                      style={[
+                        styles.scheduleRow,
+                        isNarrow && styles.scheduleRowNarrow,
+                        { position: 'relative', zIndex: scheduleDropdown?.age === age ? 10 : 1 },
+                      ]}
+                    >
+                      <Text style={styles.scheduleAgeLabel} numberOfLines={1}>{age} {i18n.t('years') || 'yrs'}</Text>
+                      <View style={styles.schedulePickersWrap}>
+                        <TouchableOpacity
+                          style={styles.schedulePickerBtn}
+                          onPress={() => setScheduleDropdown(prev => prev?.age === age && prev?.type === 'day' ? null : { age, type: 'day' })}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.schedulePickerText} numberOfLines={1}>
+                            {schedule[age]?.day ? (i18n.t(schedule[age].day) || schedule[age].day) : (i18n.t('day') || 'Day')}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.schedulePickerBtn}
+                          onPress={() => setScheduleDropdown(prev => prev?.age === age && prev?.type === 'time' ? null : { age, type: 'time' })}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.schedulePickerText} numberOfLines={1}>
+                            {schedule[age]?.time ? formatTime12Hour(schedule[age].time) : (i18n.t('time') || 'Time')}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                      {scheduleDropdown?.age === age && (
+                        <View style={[styles.scheduleDropdown, { maxWidth: screenWidth - 48 }, isNarrow && styles.scheduleDropdownNarrow]}>
+                          <ScrollView style={styles.scheduleDropdownScroll} showsVerticalScrollIndicator={true}>
+                            {scheduleDropdown.type === 'day'
+                              ? DAYS_OF_WEEK.map((day) => (
+                                  <TouchableOpacity
+                                    key={day}
+                                    onPress={() => {
+                                      setSchedule(s => ({ ...s, [age]: { ...(s[age] || { day: '', time: '' }), day } }));
+                                      setScheduleDropdown(null);
+                                    }}
+                                    style={[styles.scheduleDropdownItem, schedule[age]?.day === day && styles.scheduleDropdownItemSelected]}
+                                    activeOpacity={0.7}
+                                  >
+                                    <Text style={styles.scheduleDropdownItemText}>{i18n.t(day) || day}</Text>
+                                  </TouchableOpacity>
+                                ))
+                              : TIME_OPTIONS.map((t) => (
+                                  <TouchableOpacity
+                                    key={t}
+                                    onPress={() => {
+                                      setSchedule(s => ({ ...s, [age]: { ...(s[age] || { day: '', time: '' }), time: t } }));
+                                      setScheduleDropdown(null);
+                                    }}
+                                    style={[styles.scheduleDropdownItem, schedule[age]?.time === t && styles.scheduleDropdownItemSelected]}
+                                    activeOpacity={0.7}
+                                  >
+                                    <Text style={styles.scheduleDropdownItemText}>{t}</Text>
+                                  </TouchableOpacity>
+                                ))}
+                          </ScrollView>
+                          <TouchableOpacity onPress={() => setScheduleDropdown(null)} style={styles.scheduleDropdownCancel} activeOpacity={0.8}>
+                            <Text style={styles.scheduleDropdownCancelText}>{i18n.t('cancel') || 'Cancel'}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                    </View>
+                  ))
+                )}
               </View>
 
               <TouchableOpacity
@@ -580,6 +707,70 @@ const styles = StyleSheet.create({
   },
   placeholderText: {
     color: '#999',
+  },
+  cityPickerWrapper: {
+    paddingHorizontal: 16,
+  },
+  cityText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#000',
+    paddingVertical: 16,
+  },
+  cityPlaceholder: {
+    color: '#999',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '90%',
+    maxHeight: '70%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  modalScrollView: {
+    maxHeight: 400,
+  },
+  cityOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  cityOptionSelected: {
+    backgroundColor: '#000',
+  },
+  cityOptionText: {
+    fontSize: 16,
+    color: '#000',
+  },
+  cityOptionTextSelected: {
+    color: '#fff',
+    fontWeight: '600',
   },
   bubbleRow: {
     flexDirection: 'row',

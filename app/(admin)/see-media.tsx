@@ -16,7 +16,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { collection, doc, getDoc, onSnapshot, query, getDocs, where } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, query, getDocs, where, deleteDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { isAdmin } from '../../services/ModerationService';
 
@@ -36,6 +36,44 @@ export default function AdminAllMediaScreen() {
   const [mediaList, setMediaList] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [fullScreenMedia, setFullScreenMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
+
+  const handleDeleteMedia = (mediaId: string) => {
+    Alert.alert(
+      "Delete Media",
+      "Are you sure you want to delete this media? It will be permanently removed from all feeds.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // 1. Delete from media collection
+              await deleteDoc(doc(db, 'media', mediaId));
+
+              // 2. Find and delete associated posts from feeds
+              const postsRef = collection(db, 'posts');
+              const postQuery = query(postsRef, where('mediaId', '==', mediaId));
+              const postSnap = await getDocs(postQuery);
+
+              if (!postSnap.empty) {
+                const batch = writeBatch(db);
+                postSnap.forEach((docSnap) => {
+                  batch.delete(docSnap.ref);
+                });
+                await batch.commit();
+              }
+
+              Alert.alert("Success", "Media and associated posts deleted successfully.");
+            } catch (error) {
+              console.error("Error deleting media:", error);
+              Alert.alert("Error", "Failed to delete media.");
+            }
+          }
+        }
+      ]
+    );
+  };
 
   useEffect(() => {
     // Verify admin access
@@ -208,7 +246,22 @@ export default function AdminAllMediaScreen() {
                         : 'Unknown date'}
                     </Text>
                   </View>
-                  <Ionicons name="eye-outline" size={24} color="#666" style={{ alignSelf: 'center' }} />
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <TouchableOpacity
+                      style={{ marginRight: 16 }}
+                      onPress={() =>
+                        setFullScreenMedia({
+                          uri: media.secureUrl,
+                          type: media.resourceType,
+                        })
+                      }
+                    >
+                      <Ionicons name="eye-outline" size={24} color="#666" />
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDeleteMedia(media.id)}>
+                      <Ionicons name="trash-outline" size={24} color="#ff3b30" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               ))}
             </>
