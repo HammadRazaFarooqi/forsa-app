@@ -2,8 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Alert } from 'react-native';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
@@ -16,6 +18,32 @@ const ClinicEditTimetableScreen = () => {
   const [timePicker, setTimePicker] = useState<{visible: boolean, mode: 'from' | 'to', day: string | null}>({visible: false, mode: 'from', day: null});
   const [tempTime, setTempTime] = useState(new Date());
   const { openMenu } = useHamburgerMenu();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const fetchTimetable = async () => {
+      if (!auth.currentUser) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const docRef = doc(db, 'clinics', auth.currentUser.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.workingHours) {
+            setWorkingHours(data.workingHours);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching timetable", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchTimetable();
+  }, []);
 
   // Removed fade animation to prevent color glitch on screen load
   // Screen now renders with correct colors immediately
@@ -28,6 +56,40 @@ const ClinicEditTimetableScreen = () => {
     const h12 = h % 12 || 12;
     return `${h12}:${minutes} ${period}`;
   };
+
+  const handleSave = async () => {
+    if (!auth.currentUser) return;
+    setSaving(true);
+    try {
+      // Normalize working hours
+      const normalizedHours: Record<string, { from: string; to: string; doctors: string; off?: boolean }> = { ...workingHours };
+      for (const day of Object.keys(normalizedHours)) {
+        const config = normalizedHours[day];
+        if (!config.off) {
+          if (!config.from) config.from = '09:00';
+          if (!config.to) config.to = '17:00';
+        }
+      }
+
+      await setDoc(doc(db, 'clinics', auth.currentUser.uid), { workingHours: normalizedHours }, { merge: true });
+      await setDoc(doc(db, 'users', auth.currentUser.uid), { workingHours: normalizedHours }, { merge: true });
+
+      Alert.alert(i18n.t('success') || 'Success', 'Timetable updated successfully');
+    } catch (err) {
+      console.error("Error saving timetable", err);
+      Alert.alert(i18n.t('error') || 'Error', 'Failed to update timetable');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a1a1a' }]}>
+        <ActivityIndicator size="large" color="#fff" />
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -136,8 +198,17 @@ const ClinicEditTimetableScreen = () => {
             );
           })}
               </View>
-              <TouchableOpacity style={styles.saveButton} activeOpacity={0.8}>
-                <Text style={styles.saveButtonText}>{i18n.t('save') || 'Save'}</Text>
+              <TouchableOpacity
+                style={[styles.saveButton, saving && { opacity: 0.7 }]}
+                activeOpacity={0.8}
+                onPress={handleSave}
+                disabled={saving}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>{i18n.t('save') || 'Save'}</Text>
+                )}
               </TouchableOpacity>
             </View>
           </ScrollView>

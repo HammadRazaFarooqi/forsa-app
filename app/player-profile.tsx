@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useRef, useState, useEffect } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
@@ -24,6 +24,7 @@ export default function PlayerProfileScreen() {
   const [profilePhotoUrl, setProfilePhotoUrl] = useState<string | null>(null); // Firebase Storage URL
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showCityModal, setShowCityModal] = useState(false);
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -283,16 +284,58 @@ export default function PlayerProfileScreen() {
 
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>{i18n.t('city') || 'City'}</Text>
-                <View style={styles.inputWrapper}>
+                <TouchableOpacity
+                  style={[styles.inputWrapper, styles.cityPickerWrapper]}
+                  onPress={() => setShowCityModal(true)}
+                >
                   <Ionicons name="location-outline" size={20} color="#999" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              value={city}
-              onChangeText={setCity}
-                    placeholder={i18n.t('selectCity') || 'Enter city'}
-                    placeholderTextColor="#999"
-                  />
-                </View>
+                  <Text style={[styles.cityText, !city && styles.cityPlaceholder]}>
+                    {city ? (i18n.t('cities', { returnObjects: true }) as Record<string, string>)[city] || city : i18n.t('selectCity')}
+                  </Text>
+                  <Ionicons name="chevron-down" size={20} color="#999" />
+                </TouchableOpacity>
+
+                {/* City Selection Modal */}
+                <Modal
+                  visible={showCityModal}
+                  transparent={true}
+                  animationType="fade"
+                  onRequestClose={() => setShowCityModal(false)}
+                >
+                  <TouchableOpacity
+                    style={styles.modalOverlay}
+                    activeOpacity={1}
+                    onPress={() => setShowCityModal(false)}
+                  >
+                    <View style={styles.modalContent}>
+                      <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>{i18n.t('selectCity')}</Text>
+                        <TouchableOpacity onPress={() => setShowCityModal(false)}>
+                          <Ionicons name="close" size={24} color="#000" />
+                        </TouchableOpacity>
+                      </View>
+                      <ScrollView style={styles.modalScrollView} showsVerticalScrollIndicator={true}>
+                        {Object.entries(i18n.t('cities', { returnObjects: true }) as Record<string, string>).map(([key, label]) => (
+                          <TouchableOpacity
+                            key={key}
+                            style={[styles.cityOption, city === key && styles.cityOptionSelected]}
+                            onPress={() => {
+                              setCity(key);
+                              setShowCityModal(false);
+                            }}
+                          >
+                            <Text style={[styles.cityOptionText, city === key && styles.cityOptionTextSelected]}>
+                              {label}
+                            </Text>
+                            {city === key && (
+                              <Ionicons name="checkmark" size={20} color="#fff" />
+                            )}
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    </View>
+                  </TouchableOpacity>
+                </Modal>
               </View>
 
               <View style={styles.inputGroup}>
@@ -464,6 +507,75 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#000',
     paddingVertical: 16,
+  },
+  cityPickerWrapper: {
+    justifyContent: 'space-between',
+  },
+  cityText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#000',
+    paddingVertical: 16,
+  },
+  cityPlaceholder: {
+    color: '#999',
+  },
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '90%',
+    maxHeight: '70%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  modalScrollView: {
+    maxHeight: 400,
+  },
+  cityOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  cityOptionSelected: {
+    backgroundColor: '#000',
+  },
+  cityOptionText: {
+    fontSize: 16,
+    color: '#000',
+  },
+  cityOptionTextSelected: {
+    color: '#fff',
+    fontWeight: '600',
   },
   saveButton: {
     backgroundColor: '#000',

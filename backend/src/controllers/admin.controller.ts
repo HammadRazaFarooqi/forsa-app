@@ -320,3 +320,57 @@ export async function getBookingById(req: Request, res: Response, next: NextFunc
   }
 }
 
+/**
+ * Record an admin-to-user message in backend and notify the user
+ */
+export async function createAdminMessage(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id: userId } = req.params;
+    const { content } = req.body;
+
+    if (!content || typeof content !== 'string' || !content.trim()) {
+      sendError(res, 'VALIDATION_ERROR', 'Message content is required', null, 400);
+      return;
+    }
+
+    // Create a backend record for admin messages
+    const adminId = req.user?.userId || null;
+    const payload = {
+      adminId,
+      userId,
+      content: content.trim(),
+      createdAt: new Date(),
+    };
+
+    const docRef = await db.collection('admin_messages').add(payload as any);
+
+    // Also create a notification for the user (so they see it in-app)
+    await createNotificationForUser({
+      userId,
+      title: 'Message from Admin',
+      body: content.trim().slice(0, 200),
+      type: 'info',
+      data: { adminMessageId: docRef.id },
+      createdBy: adminId,
+    });
+
+    sendSuccess(res, { id: docRef.id, ...payload }, 'Admin message recorded');
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Get admin messages for a specific user
+ */
+export async function getAdminMessages(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id: userId } = req.params;
+    const snapshot = await db.collection('admin_messages').where('userId', '==', userId).orderBy('createdAt', 'desc').get();
+    const messages = snapshot.docs.map((d: any) => ({ id: d.id, ...(d.data() as any) }));
+    sendSuccess(res, { messages }, 'Admin messages retrieved');
+  } catch (error) {
+    next(error);
+  }
+}
+

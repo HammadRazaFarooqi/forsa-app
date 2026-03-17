@@ -630,6 +630,8 @@ export default {
   selectDate: "اختر التاريخ",
   selectTime: "اختر الوقت",
   preferredDateTime: "التاريخ والوقت المفضل",
+  selectDateAndTime: "اختر التاريخ والوقت",
+  date: "التاريخ",
   startChat: "ابدأ المحادثة",
   "working_hours": "ساعات العمل",
   "day": "اليوم",

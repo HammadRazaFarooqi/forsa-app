@@ -6,8 +6,12 @@ import {
   updateBookingStatus,
   cancelBooking,
   getProviderBookings,
+  proposeBookingChange,
+  respondToProposal,
 } from '../controllers/booking.controller';
 import { authenticate } from '../middleware/auth.middleware';
+import { requireRole } from '../middleware/auth.middleware';
+import { UserRole } from '../types';
 
 const router = Router();
 
@@ -150,6 +154,16 @@ router.get('/:id', authenticate, getBookingById);
  *         description: Booking status updated successfully
  */
 router.put('/:id/status', authenticate, updateBookingStatus);
+
+/**
+ * Admin proposes a new date/time for a booking
+ */
+router.post('/:id/propose', authenticate, requireRole(UserRole.ADMIN), proposeBookingChange);
+
+/**
+ * Booking owner responds to a proposal (accept/reject)
+ */
+router.post('/:id/proposals/:proposalId/respond', authenticate, respondToProposal);
 
 /**
  * @swagger

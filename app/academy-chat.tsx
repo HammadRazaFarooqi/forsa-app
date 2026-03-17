@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState, useEffect, useRef } from 'react';
-import { FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import { FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Alert } from 'react-native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
@@ -119,6 +119,7 @@ export default function AcademyChatScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{contact}</Text>
+        {/* admin shortcut removed from chat screen */}
         <TouchableOpacity 
           style={styles.hamburgerBtn} 
           onPress={openMenu} 

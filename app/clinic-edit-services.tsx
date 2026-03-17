@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Alert } from 'react-native';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
@@ -25,9 +27,43 @@ const ClinicEditServicesScreen = () => {
   const [services, setServices] = useState<{ key: string; price: string }[]>([]);
   const [customServices, setCustomServices] = useState<{ name: string; price: string }[]>([]);
   const { openMenu } = useHamburgerMenu();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  // Removed fade animation to prevent color glitch on screen load
-  // Screen now renders with correct colors immediately
+  useEffect(() => {
+    const fetchServices = async () => {
+      if (!auth.currentUser) {
+        setLoading(false);
+        return;
+      }
+      try {
+        const docRef = doc(db, 'clinics', auth.currentUser.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const loadedServices: { key: string; price: string }[] = [];
+          
+          if (data.services) {
+            Object.keys(data.services).forEach(key => {
+              if (data.services[key].selected) {
+                 loadedServices.push({ key, price: data.services[key].fee || '' });
+              }
+            });
+          }
+          setServices(loadedServices);
+          
+          if (data.customServices) {
+            setCustomServices(data.customServices);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching services", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchServices();
+  }, []);
 
   const handleServiceToggle = (key: string) => {
     setServices((prev) =>
@@ -45,6 +81,43 @@ const ClinicEditServicesScreen = () => {
   const handleCustomServiceChange = (idx: number, field: 'name' | 'price', value: string) => {
     setCustomServices((prev) => prev.map((s, i) => i === idx ? { ...s, [field]: value } : s));
   };
+  
+  const handleSave = async () => {
+    if (!auth.currentUser) return;
+    setSaving(true);
+    try {
+      const servicesData: any = {};
+      allServices.forEach(s => {
+        servicesData[s.key] = { selected: false, fee: '' };
+      });
+      services.forEach(s => {
+        servicesData[s.key] = { selected: true, fee: s.price };
+      });
+
+      const updateData = {
+        services: servicesData,
+        customServices
+      };
+
+      await setDoc(doc(db, 'clinics', auth.currentUser.uid), updateData, { merge: true });
+      await setDoc(doc(db, 'users', auth.currentUser.uid), updateData, { merge: true });
+
+      Alert.alert(i18n.t('success') || 'Success', 'service edit successfully');
+    } catch (err) {
+      console.error("Error saving services", err);
+      Alert.alert(i18n.t('error') || 'Error', 'Failed to update services');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#1a1a1a' }]}>
+        <ActivityIndicator size="large" color="#fff" />
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -144,8 +217,17 @@ const ClinicEditServicesScreen = () => {
             );
           })}
         </View>
-              <TouchableOpacity style={styles.saveButton} activeOpacity={0.8}>
-                <Text style={styles.saveButtonText}>{i18n.t('save') || 'Save'}</Text>
+              <TouchableOpacity
+                style={[styles.saveButton, saving && { opacity: 0.7 }]}
+                activeOpacity={0.8}
+                onPress={handleSave}
+                disabled={saving}
+              >
+                {saving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.saveButtonText}>{i18n.t('save') || 'Save'}</Text>
+                )}
         </TouchableOpacity>
             </View>
       </ScrollView>

@@ -8,6 +8,7 @@ import {
 } from '../controllers/admin.controller';
 import { authenticate, requireRole } from '../middleware/auth.middleware';
 import { UserRole } from '../types';
+import { createAdminMessage } from '../controllers/admin.controller';
 
 const router = Router();
 
@@ -148,6 +149,25 @@ router.get('/bookings', listAllBookings);
  *         description: Booking retrieved successfully
  */
 router.get('/bookings/:id', getAdminBookingById);
+
+/**
+ * Record that admin sent a message to a user and create a notification
+ */
+router.post('/users/:id/message', createAdminMessage);
+
+/**
+ * Get admin messages sent to a user
+ */
+router.get('/users/:id/messages', async (req, res, next) => {
+  // Delegate to controller
+  try {
+    const { id } = req.params;
+    const { getAdminMessages } = await import('../controllers/admin.controller');
+    return getAdminMessages(req, res, next);
+  } catch (err) {
+    next(err);
+  }
+});
 
 export default router;
 

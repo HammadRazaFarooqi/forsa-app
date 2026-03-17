@@ -227,7 +227,7 @@ export default function PlayerBookingsScreen() {
                       )}
                       <View style={styles.bookingDetail}>
                         <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.7)" />
-                        <Text style={styles.bookingDetailText}>{i18n.t('day') || 'Day'}: {booking.day || '—'}</Text>
+                        <Text style={styles.bookingDetailText}>{i18n.t('date') || 'Date'}: {booking.date || '—'}</Text>
                       </View>
                       <View style={styles.bookingDetail}>
                         <Ionicons name="time" size={16} color="rgba(255,255,255,0.7)" />
@@ -264,12 +264,7 @@ export default function PlayerBookingsScreen() {
                       <Ionicons name="calendar" size={16} color="rgba(255,255,255,0.7)" />
                       <Text style={styles.bookingDateTimeText}>{booking.date || (booking.createdAt ? new Date(booking.createdAt).toLocaleDateString() : 'N/A')}</Text>
                     </View>
-                    {booking.day && (
-                      <View style={styles.bookingDateTime}>
-                        <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.7)" />
-                        <Text style={styles.bookingDateTimeText}>{booking.day}</Text>
-                      </View>
-                    )}
+
                     {booking.time && (
                       <View style={styles.bookingDateTime}>
                         <Ionicons name="time" size={16} color="rgba(255,255,255,0.7)" />

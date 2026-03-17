@@ -6,7 +6,7 @@ import { Animated, Easing, FlatList, KeyboardAvoidingView, Platform, StyleSheet,
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
-import { subscribeToConversations, Conversation } from '../services/MessagingService';
+import { subscribeToConversations, Conversation, findAdminUserId, getOrCreateConversation } from '../services/MessagingService';
 import { getChattableUsers, startConversationWithUser } from '../services/BookingMessagingService';
 import { Alert } from 'react-native';
 
@@ -125,6 +125,18 @@ export default function AcademyMessagesScreen() {
               <Text style={styles.headerTitle}>{i18n.t('academyMessages') || 'Messages'}</Text>
               <Text style={styles.headerSubtitle}>{i18n.t('yourConversations') || 'Your conversations'}</Text>
             </View>
+            <TouchableOpacity style={{ position: 'absolute', right: 16, top: Platform.OS === 'ios' ? 60 : 40 }} onPress={async () => {
+              try {
+                const adminId = await findAdminUserId();
+                if (!adminId) { Alert.alert('No admin found'); return; }
+                const convId = await getOrCreateConversation(adminId);
+                router.push({ pathname: '/academy-chat', params: { conversationId: convId, otherUserId: adminId, contact: 'Admin' } });
+              } catch (err) { console.error(err); }
+            }}>
+              <View style={{ backgroundColor: 'transparent', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }}>
+                <Text style={{ color: '#fff', fontWeight: '600' }}>Text Admin</Text>
+              </View>
+            </TouchableOpacity>
       </View>
 
       <HamburgerMenu />

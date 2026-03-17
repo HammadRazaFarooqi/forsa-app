@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Image, Modal } from 'react-native';
+import { Animated, Easing, FlatList, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Image, Modal, Alert } from 'react-native';
 import i18n from '../locales/i18n';
 import { 
   getOrCreateConversation, 
@@ -11,6 +11,7 @@ import {
   markMessagesAsRead,
   Message 
 } from '../services/MessagingService';
+import { findAdminUserId } from '../services/MessagingService';
 import { getChattableUsers, startConversationWithUser } from '../services/BookingMessagingService';
 import { auth } from '../lib/firebase';
 
@@ -174,6 +175,21 @@ export default function AgentMessagesScreen() {
               <Text style={styles.headerSubtitle}>{i18n.t('chatting') || 'Chatting'}</Text>
         </View>
             <TouchableOpacity 
+              style={[styles.usersButton, { marginRight: 8 }]} 
+              onPress={async () => {
+                try {
+                  const adminId = await findAdminUserId();
+                  if (!adminId) { Alert.alert('No admin found'); return; }
+                  const convId = await getOrCreateConversation(adminId);
+                  router.push({ pathname: '/agent-messages', params: { conversationId: convId, otherUserId: adminId, name: 'Admin' } });
+                } catch (err) { console.error(err); }
+              }}
+            >
+              <View style={{ backgroundColor: 'transparent', borderRadius: 16, paddingHorizontal: 8, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }}>
+                <Text style={{ color: '#fff', fontWeight: '600' }}>Text Admin</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity 
               style={styles.usersButton} 
               onPress={() => setShowUsersList(true)}
             >
@@ -228,7 +244,7 @@ export default function AgentMessagesScreen() {
           onChangeText={setInput}
           placeholder={i18n.t('typeMessage') || 'Type a message...'}
               placeholderTextColor="#999"
-          onSubmitEditing={sendMessage}
+          onSubmitEditing={() => handleSendMessage()}
           returnKeyType="send"
         />
             <TouchableOpacity 

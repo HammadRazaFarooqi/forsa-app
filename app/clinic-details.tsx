@@ -2,7 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useRef, useState, useEffect } from 'react';
-import { Alert, Animated, Easing, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import { Alert, Animated, Easing, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Modal } from 'react-native';
+import DateTimePickerModal from "react-native-modal-datetime-picker";
 import i18n from '../locales/i18n';
 import { auth, db } from '../lib/firebase';
 import { doc, getDoc, collection, addDoc } from 'firebase/firestore';
@@ -17,7 +18,18 @@ export default function ClinicDetailsScreen() {
   const [selectedServiceIndex, setSelectedServiceIndex] = useState(0);
   const [selectedDoctorIndex, setSelectedDoctorIndex] = useState(0);
   const [bookingComments, setBookingComments] = useState('');
+  const [preferredTime, setPreferredTime] = useState<Date | null>(null);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  const hideDatePicker = () => {
+    setShowTimePicker(false);
+  };
+
+  const handleConfirm = (date: Date) => {
+    setPreferredTime(date);
+    hideDatePicker();
+  };
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -33,7 +45,7 @@ export default function ClinicDetailsScreen() {
       try {
         const parsed = JSON.parse(params.clinic as string);
         clinicId = parsed.id;
-      } catch (e) {}
+      } catch (e) { }
     }
 
     if (clinicId) {
@@ -82,6 +94,22 @@ export default function ClinicDetailsScreen() {
           });
         }
 
+        const doctorNames = new Set<string>();
+        if (data.doctors) {
+          data.doctors.forEach((d: any) => {
+            if (d.name) doctorNames.add(d.name.trim());
+          });
+        }
+        if (data.workingHours) {
+          Object.values(data.workingHours).forEach((dayData: any) => {
+            if (dayData.doctors) {
+              dayData.doctors.split(',').forEach((docName: string) => {
+                if (docName.trim()) doctorNames.add(docName.trim());
+              });
+            }
+          });
+        }
+
         setClinic({
           id: docSnap.id,
           name: data.clinicName || data.name,
@@ -92,7 +120,7 @@ export default function ClinicDetailsScreen() {
           desc: data.description,
           services: servicesList,
           workingHours: workingHoursList,
-          doctors: data.doctors ? data.doctors.map((d: any) => d.name) : []
+          doctors: Array.from(doctorNames)
         });
       } else {
       }
@@ -160,7 +188,7 @@ export default function ClinicDetailsScreen() {
           const userData = userDoc.data();
           playerName = userData.name || `${userData.firstName || ''} ${userData.lastName || ''}`.trim() || playerName;
         }
-      } catch (err) {}
+      } catch (err) { }
 
       const bookingData = {
         playerId: user.uid,
@@ -171,7 +199,9 @@ export default function ClinicDetailsScreen() {
         providerName: clinic.name,
         type: 'clinic',
         status: 'pending',
-        date: new Date().toISOString().split('T')[0],
+        date: preferredTime ? preferredTime.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        time: preferredTime ? preferredTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
+        preferredTime: preferredTime ? preferredTime.toISOString() : null,
         createdAt: new Date().toISOString(),
         name: clinic.name,
         city: clinic.city,
@@ -367,6 +397,27 @@ export default function ClinicDetailsScreen() {
               ) : (
                 <Text style={styles.bookingHint}>{i18n.t('noDoctorsListed') || 'No doctors listed'}</Text>
               )}
+
+              <Text style={styles.bookingLabel}>{i18n.t('preferredDateTime') || 'Preferred Date & Time'}</Text>
+              <TouchableOpacity
+                style={styles.timePickerContainer}
+                onPress={() => setShowTimePicker(true)}
+              >
+                <Ionicons name="calendar-outline" size={20} color="#666" style={styles.timeIcon} />
+                <Text style={[styles.timeText, !preferredTime && styles.timePlaceholder]}>
+                  {preferredTime ? preferredTime.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : (i18n.t('selectDateAndTime') || 'Select preferred date & time')}
+                </Text>
+              </TouchableOpacity>
+              
+              <DateTimePickerModal
+                isVisible={showTimePicker}
+                mode="datetime"
+                date={preferredTime || new Date()}
+                onConfirm={handleConfirm}
+                onCancel={hideDatePicker}
+                is24Hour={false}
+                textColor="#000"
+              />
 
               <Text style={styles.bookingLabel}>{i18n.t('additionalComments') || 'Additional comments (optional)'}</Text>
               <TextInput
@@ -687,6 +738,65 @@ const styles = StyleSheet.create({
     color: '#000',
     minHeight: 80,
     textAlignVertical: 'top',
+  },
+  timePickerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+  },
+  timeIcon: {
+    marginRight: 10,
+  },
+  timeText: {
+    fontSize: 16,
+    color: '#000',
+    flex: 1,
+  },
+  timePlaceholder: {
+    color: '#999',
+  },
+  iosDatePickerModal: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  iosDatePickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    backgroundColor: '#f5f5f5',
+  },
+  iosDatePicker: {
+    height: 200,
+    backgroundColor: '#fff',
+  },
+  datePickerButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#000',
+    borderRadius: 8,
+  },
+  datePickerButtonText: {
+    color: '#fff',
+    fontWeight: '600',
   },
   reserveButton: {
     backgroundColor: '#000',

@@ -18,6 +18,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { getCurrentUserRole } from './UserRoleService';
+import { notifyAdmins } from './NotificationService';
 
 export interface Message {
   id: string;
@@ -104,6 +105,25 @@ export async function getOrCreateConversation(
 }
 
 /**
+ * Find any admin user ID (returns first found). Used for users to message admin.
+ */
+export async function findAdminUserId(): Promise<string | null> {
+  try {
+    const q = query(collection(db, 'users'), where('role', '==', 'admin'), limit(1));
+    const snap = await getDocs(q);
+    if (!snap.empty) return snap.docs[0].id;
+    // try uppercase role
+    const q2 = query(collection(db, 'users'), where('role', '==', 'ADMIN'), limit(1));
+    const snap2 = await getDocs(q2);
+    if (!snap2.empty) return snap2.docs[0].id;
+    return null;
+  } catch (error) {
+    console.error('Error finding admin user:', error);
+    return null;
+  }
+}
+
+/**
  * Send a message in a conversation
  */
 export async function sendMessage(
@@ -144,6 +164,34 @@ export async function sendMessage(
       lastMessageAt: serverTimestamp(),
       lastMessageSenderId: currentUser.uid,
     });
+
+    // If the recipient is an admin, notify all admins so they receive a notification
+    try {
+      const parts = conversationId.split('_');
+      const otherUserId = parts[0] === currentUser.uid ? parts[1] : parts[0];
+      // fetch other user role
+      const otherUserRef = doc(db, 'users', otherUserId);
+      const otherSnap = await getDoc(otherUserRef);
+      if (otherSnap.exists()) {
+        const otherData: any = otherSnap.data();
+        const role = otherData.role || otherData.role?.toLowerCase?.();
+        if (role === 'admin' || role === 'Admin') {
+          // fetch sender name
+          const senderRef = doc(db, 'users', currentUser.uid);
+          const senderSnap = await getDoc(senderRef);
+          const senderName = senderSnap.exists() ? ((senderSnap.data() as any).firstName || (senderSnap.data() as any).email || 'User') : 'User';
+          // Notify all admins
+          await notifyAdmins(
+            `New message from ${senderName}`,
+            content.trim() || 'Sent a message',
+            'info',
+            { senderId: currentUser.uid, conversationId }
+          );
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to notify admins about message:', err);
+    }
 
     return messageId;
   } catch (error: any) {

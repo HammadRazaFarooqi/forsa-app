@@ -560,6 +560,8 @@ export default {
   selectDate: "Select date",
   selectTime: "Select time",
   preferredDateTime: "Preferred date & time",
+  selectDateAndTime: "Select date and time",
+  date: "Date",
   clearFilters: "Clear filters",
   time: "Time",
   toBeConfirmed: "To be confirmed",

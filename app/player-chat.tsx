@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
-import { FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import { FlatList, Image, KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator, Alert } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
@@ -12,6 +13,7 @@ import {
   subscribeToMessages, 
   markMessagesAsRead,
   Message 
+  
 } from '../services/MessagingService';
 import { auth } from '../lib/firebase';
 
@@ -192,6 +194,7 @@ export default function PlayerChatScreen() {
             </View>
           </TouchableOpacity>
           <Text style={[CommonStyles.titleText, { alignSelf: 'center' }]} numberOfLines={1} ellipsizeMode="tail">{name || i18n.t('chat') || 'Chat'}</Text>
+          {/* admin shortcut removed from chat screen */}
         </View>
       </View>
       <HamburgerMenu />
@@ -227,6 +230,7 @@ export default function PlayerChatScreen() {
           }
         />
       )}
+      
       {/* Input Bar */}
       <View style={styles.inputRow}>
         <TextInput

@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, TextInput } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, TextInput, Modal, FlatList } from 'react-native';
 import { useAuth } from '../../context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { collection, getCountFromServer, query, where, getDocs, limit, orderBy, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { getOrCreateConversation, sendMessage } from '../../services/MessagingService';
 
 export default function AdminDashboard() {
     const [stats, setStats] = useState<any>(null);
@@ -113,6 +114,25 @@ export default function AdminDashboard() {
         }
     };
 
+    // Messaging modal state (select a user to open chat)
+    const [messageModalVisible, setMessageModalVisible] = useState(false);
+    const [usersList, setUsersList] = useState<any[]>([]);
+
+    const openMessageModal = async () => {
+        setMessageModalVisible(true);
+        setUsersList([]);
+        try {
+            const querySnapshot = await getDocs(collection(db, 'users'));
+            const list = querySnapshot.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+            setUsersList(list);
+        } catch (error) {
+            console.error('Error fetching users for messaging:', error);
+            Alert.alert('Error', 'Failed to load users');
+        }
+    };
+
+    // Selecting a user opens the admin chat screen for that user
+
     const StatCard = ({ title, value, icon, color }: any) => (
         <View style={[styles.card, { borderLeftColor: color, borderLeftWidth: 5 }]}>
             <View style={styles.cardInfo}>
@@ -219,6 +239,43 @@ export default function AdminDashboard() {
                 ))}
                 {(!stats?.activities || stats.activities.length === 0) && <Text style={styles.emptyText}>No recent activity</Text>}
             </View>
+
+            {/* Admin messaging */}
+            <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Admin Messages</Text>
+                <View style={styles.listCard}>
+                    <TouchableOpacity style={[styles.saveBtn, { alignSelf: 'stretch', paddingVertical: 12 }]} onPress={openMessageModal}>
+                        <Text style={styles.saveBtnText}>Send Message to User</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+
+            {/* Message modal */}
+            <Modal visible={messageModalVisible} animationType="slide" transparent>
+                <View style={styles.modalContainer}>
+                    <View style={styles.modalContent}>
+                        <Text style={[styles.sectionTitle, { marginBottom: 12 }]}>Send Message</Text>
+                        <Text style={{ marginBottom: 8, color: '#666' }}>Select recipient</Text>
+                                    <FlatList
+                                        data={usersList}
+                                        keyExtractor={item => item.id}
+                                        style={{ maxHeight: 320, marginBottom: 8 }}
+                                        renderItem={({ item }) => (
+                                                <TouchableOpacity onPress={() => router.push(`/(admin)/user-chat?otherUserId=${item.id}&name=${encodeURIComponent((item.name || `${item.firstName || ''} ${item.lastName || ''}`).trim() || item.email || 'User')}`)} style={[styles.userRow]}>
+                                                    <Text style={styles.itemText}>{item.name || `${item.firstName || ''} ${item.lastName || ''}`.trim() || item.email || 'Unknown'}</Text>
+                                                    <Text style={{ color: '#888', fontSize: 12 }}>{item.role || ''}</Text>
+                                                </TouchableOpacity>
+                                        )}
+                                    />
+
+                                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8 }}>
+                                        <TouchableOpacity style={[styles.saveBtn, { backgroundColor: '#ccc', paddingHorizontal: 16 }]} onPress={() => setMessageModalVisible(false)}>
+                                            <Text style={styles.saveBtnText}>Close</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                    </View>
+                </View>
+            </Modal>
 
             <View style={styles.navigation}>
                 <View style={styles.navRow}>
@@ -572,5 +629,29 @@ const styles = StyleSheet.create({
         fontSize: 11,
         textAlign: 'center',
         lineHeight: 14,
+    }
+    ,
+    modalContainer: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+        justifyContent: 'center',
+        padding: 20,
+    },
+    modalContent: {
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        padding: 16,
+    },
+    userRow: {
+        paddingVertical: 10,
+        paddingHorizontal: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f1f3f5',
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center'
+    },
+    selectedUser: {
+        backgroundColor: '#eef3ff'
     }
 });

@@ -3,6 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useRef, useState, useEffect } from 'react';
 import { Alert, Animated, Easing, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import DateTimePickerModal from "react-native-modal-datetime-picker";
 import i18n from '../locales/i18n';
 import { auth, db } from '../lib/firebase';
 import { doc, getDoc, collection, addDoc } from 'firebase/firestore';
@@ -17,7 +18,18 @@ export default function AcademyClinicDetailsScreen() {
   const [selectedServiceIndex, setSelectedServiceIndex] = useState(0);
   const [selectedDoctorIndex, setSelectedDoctorIndex] = useState(0);
   const [bookingComments, setBookingComments] = useState('');
+  const [preferredTime, setPreferredTime] = useState<Date | null>(null);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  const hideDatePicker = () => {
+    setShowTimePicker(false);
+  };
+
+  const handleConfirm = (date: Date) => {
+    setPreferredTime(date);
+    hideDatePicker();
+  };
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -69,6 +81,22 @@ export default function AcademyClinicDetailsScreen() {
           });
         }
 
+        const doctorNames = new Set<string>();
+        if (data.doctors) {
+          data.doctors.forEach((d: any) => {
+            if (d.name) doctorNames.add(d.name.trim());
+          });
+        }
+        if (data.workingHours) {
+          Object.values(data.workingHours).forEach((dayData: any) => {
+            if (dayData.doctors) {
+              dayData.doctors.split(',').forEach((docName: string) => {
+                if (docName.trim()) doctorNames.add(docName.trim());
+              });
+            }
+          });
+        }
+
         setClinic({
           id: docSnap.id,
           name: data.clinicName,
@@ -79,7 +107,7 @@ export default function AcademyClinicDetailsScreen() {
           desc: data.description,
           services: servicesList,
           workingHours: workingHoursList,
-          doctors: data.doctors ? data.doctors.map((d: any) => d.name) : []
+          doctors: Array.from(doctorNames)
         });
       }
     } catch (error) {
@@ -156,7 +184,9 @@ export default function AcademyClinicDetailsScreen() {
         providerName: clinic.name,
         type: 'clinic',
         status: 'pending',
-        date: new Date().toISOString().split('T')[0],
+        date: preferredTime ? preferredTime.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+        time: preferredTime ? preferredTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
+        preferredTime: preferredTime ? preferredTime.toISOString() : null,
         createdAt: new Date().toISOString(),
         name: clinic.name,
         city: clinic.city,
@@ -353,6 +383,26 @@ export default function AcademyClinicDetailsScreen() {
                 <Text style={styles.bookingHint}>{i18n.t('noDoctorsListed') || 'No doctors listed'}</Text>
               )}
 
+              <Text style={styles.bookingLabel}>{i18n.t('preferredDateTime') || 'Preferred Date & Time'}</Text>
+              <TouchableOpacity
+                style={styles.timePickerContainer}
+                onPress={() => setShowTimePicker(true)}
+              >
+                <Ionicons name="calendar-outline" size={20} color="#666" style={styles.timeIcon} />
+                <Text style={[styles.timeText, !preferredTime && styles.timePlaceholder]}>
+                  {preferredTime ? preferredTime.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : (i18n.t('selectDateAndTime') || 'Select preferred date & time')}
+                </Text>
+              </TouchableOpacity>
+              
+              <DateTimePickerModal
+                isVisible={showTimePicker}
+                mode="datetime"
+                date={preferredTime || new Date()}
+                onConfirm={handleConfirm}
+                onCancel={hideDatePicker}
+                textColor="#000"
+              />
+
               <Text style={styles.bookingLabel}>{i18n.t('additionalComments') || 'Additional comments (optional)'}</Text>
               <TextInput
                 style={styles.commentsInput}
@@ -444,6 +494,10 @@ const styles = StyleSheet.create({
   serviceOptionText: { fontSize: 16, color: '#000', flex: 1 },
   serviceOptionFee: { fontSize: 14, fontWeight: '600', color: '#000' },
   bookingHint: { fontSize: 14, color: '#666', fontStyle: 'italic', marginBottom: 12 },
+  timePickerContainer: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#ddd', borderRadius: 12, padding: 14, marginBottom: 16, backgroundColor: '#f9f9f9' },
+  timeIcon: { marginRight: 10 },
+  timeText: { fontSize: 15, color: '#000', flex: 1 },
+  timePlaceholder: { color: '#999' },
   commentsInput: { borderWidth: 1, borderColor: '#ddd', borderRadius: 12, padding: 12, fontSize: 15, color: '#000', minHeight: 80, textAlignVertical: 'top' },
   reserveButton: { backgroundColor: '#000', borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 20 },
   reserveButtonDisabled: { opacity: 0.6 },

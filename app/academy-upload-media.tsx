@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import { Alert, ActivityIndicator, Animated, Easing, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
@@ -12,6 +13,7 @@ import { getCurrentUserRole } from '../services/UserRoleService';
 
 export default function AcademyUploadMediaScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { openMenu } = useHamburgerMenu();
   const [media, setMedia] = useState<Array<{ uri: string; type: 'image' | 'video'; caption?: string }>>([]);
   const [captionDraft, setCaptionDraft] = useState('');
@@ -19,6 +21,11 @@ export default function AcademyUploadMediaScreen() {
   const [pendingMedia, setPendingMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{ [key: number]: boolean }>({});
+  const [currentUploadIdx, setCurrentUploadIdx] = useState<number | null>(null);
+  const [uploadPercentage, setUploadPercentage] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [estimatedSecondsLeft, setEstimatedSecondsLeft] = useState(0);
+  const uploadStartTime = useRef(0);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
@@ -29,6 +36,40 @@ export default function AcademyUploadMediaScreen() {
       useNativeDriver: true,
     }).start();
   }, []);
+
+  // Prevent back/exit during upload
+  useFocusEffect(
+    useCallback(() => {
+      const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+        if (uploading) {
+          e.preventDefault();
+          Alert.alert(
+            'Upload in progress',
+            'Please wait for your media to finish uploading before leaving.',
+            [{ text: 'OK' }]
+          );
+        }
+      });
+      return unsubscribe;
+    }, [uploading, navigation])
+  );
+
+  // Timer for elapsed time
+  React.useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (uploading && currentUploadIdx !== null) {
+      interval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - uploadStartTime.current) / 1000);
+        setElapsedSeconds(elapsed);
+        if (uploadPercentage > 0) {
+          const secondsPerPercent = elapsed / uploadPercentage;
+          const estimated = Math.max(0, Math.floor((100 - uploadPercentage) * secondsPerPercent));
+          setEstimatedSecondsLeft(estimated);
+        }
+      }, 100);
+    }
+    return () => clearInterval(interval);
+  }, [uploading, uploadPercentage, currentUploadIdx]);
 
   const handleAddMedia = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -65,22 +106,46 @@ export default function AcademyUploadMediaScreen() {
     }
 
     setUploading(true);
+    setUploadPercentage(0);
+    setElapsedSeconds(0);
+    setEstimatedSecondsLeft(0);
+    uploadStartTime.current = Date.now();
     const uploadResults: Array<{ success: boolean; error?: string }> = [];
 
     try {
       // Upload each media item sequentially
       for (let i = 0; i < media.length; i++) {
         const item = media[i];
+        setCurrentUploadIdx(i);
         setUploadProgress((prev) => ({ ...prev, [i]: true }));
+        uploadStartTime.current = Date.now();
+        setUploadPercentage(0);
+        setElapsedSeconds(0);
+        setEstimatedSecondsLeft(0);
 
         try {
-          // Pass the caption/content along with the upload
-          await uploadAndSaveMedia(
+          // Simulate progress updates (in real scenario, would come from upload event listeners)
+          const uploadPromise = uploadAndSaveMedia(
             item.uri, 
             item.type as ResourceType, 
             'public',
             item.caption || '' // Pass the caption text
           );
+
+          // Simulate linear progress while uploading
+          const progressInterval = setInterval(() => {
+            setUploadPercentage((prev) => {
+              if (prev >= 95) {
+                clearInterval(progressInterval);
+                return 95; // Cap at 95% until complete
+              }
+              return prev + Math.random() * 15; // Random increments
+            });
+          }, 200);
+
+          await uploadPromise;
+          clearInterval(progressInterval);
+          setUploadPercentage(100);
           uploadResults.push({ success: true });
         } catch (error: any) {
           console.error(`Upload failed for item ${i}:`, error);
@@ -131,7 +196,9 @@ export default function AcademyUploadMediaScreen() {
       );
     } finally {
       setUploading(false);
+      setCurrentUploadIdx(null);
       setUploadProgress({});
+      setUploadPercentage(0);
     }
   };
 
@@ -249,6 +316,30 @@ export default function AcademyUploadMediaScreen() {
                     <Text style={styles.saveBtnText}>{i18n.t('save') || 'Save'}</Text>
                   </TouchableOpacity>
                 </View>
+              </View>
+            )}
+
+            {uploading && currentUploadIdx !== null && (
+              <View style={styles.uploadStatusCard}>
+                <Text style={styles.uploadStatusTitle}>Uploading {currentUploadIdx + 1} of {media.length}</Text>
+                <View style={styles.progressBarContainer}>
+                  <View style={[styles.progressBar, { width: `${uploadPercentage}%` }]} />
+                </View>
+                <View style={styles.uploadStats}>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Progress</Text>
+                    <Text style={styles.statValue}>{Math.round(uploadPercentage)}%</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Elapsed</Text>
+                    <Text style={styles.statValue}>{elapsedSeconds}s</Text>
+                  </View>
+                  <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Estimated</Text>
+                    <Text style={styles.statValue}>{estimatedSecondsLeft}s</Text>
+                  </View>
+                </View>
+                <Text style={styles.uploadMessage}>Please do not close the app or go back during upload</Text>
               </View>
             )}
 

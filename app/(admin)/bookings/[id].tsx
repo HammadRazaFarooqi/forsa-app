@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import DateTimePickerModal from 'react-native-modal-datetime-picker';
+import { auth } from '../../../lib/firebase';
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { useLocalSearchParams } from 'expo-router';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
@@ -9,6 +13,9 @@ export default function BookingDetails() {
     const { id } = useLocalSearchParams();
     const [booking, setBooking] = useState<any | null>(null);
     const [loading, setLoading] = useState(true);
+    const [showPicker, setShowPicker] = useState(false);
+    const [proposedDate, setProposedDate] = useState<Date | null>(null);
+    // Replaced API fetch logic with direct Firestore update
 
     useEffect(() => {
         const fetchBooking = async () => {
@@ -46,6 +53,43 @@ export default function BookingDetails() {
         ]);
     };
 
+    const openProposePicker = () => {
+        setShowPicker(true);
+    };
+
+    const handleConfirm = async (date: Date) => {
+        setShowPicker(false);
+        setProposedDate(date);
+
+        const datePart = date.toISOString().split('T')[0];
+        const timePart = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const isoTime = date.toISOString();
+
+        try {
+            await updateDoc(doc(db, 'bookings', id as string), {
+                date: datePart,
+                time: timePart,
+                preferredTime: isoTime,
+                proposedByAdmin: true
+            });
+            
+            setBooking((prev: any) => ({
+                ...prev,
+                date: datePart,
+                time: timePart,
+                preferredTime: isoTime,
+                proposedByAdmin: true
+            }));
+
+            Alert.alert('Success', 'New timing proposed and updated successfully');
+        } catch (err: any) {
+            console.error('Error proposing booking change', err);
+            Alert.alert('Error', 'Failed to update booking proposal');
+        }
+    };
+
+    const handleCancelPicker = () => setShowPicker(false);
+
     if (loading) return <View style={styles.center}><ActivityIndicator size="large" color="#4e73df" /></View>;
     if (!booking) return <View style={styles.center}><Text>Booking not found</Text></View>;
 
@@ -81,12 +125,22 @@ export default function BookingDetails() {
                     value={booking.service || booking.program || 'N/A'}
                 />
                 <DetailRow label="Date" value={booking.date} />
+                {booking.time && <DetailRow label="Time" value={booking.time} />}
                 <DetailRow label="Price" value={`${booking.price || 0} EGP`} />
                 {booking.doctor && <DetailRow label="Doctor" value={booking.doctor} />}
                 {booking.ageGroup && <DetailRow label="Age Group" value={booking.ageGroup} />}
             </View>
 
             <View style={styles.actionSection}>
+                <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#4e73df' }]} onPress={openProposePicker}>
+                    <Text style={styles.actionBtnText}>Propose New Time</Text>
+                </TouchableOpacity>
+                <DateTimePickerModal
+                    isVisible={showPicker}
+                    mode="datetime"
+                    onConfirm={handleConfirm}
+                    onCancel={handleCancelPicker}
+                />
                 {booking.status !== 'confirmed' && (
                     <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#1cc88a' }]} onPress={() => updateStatus('confirmed')}>
                         <Text style={styles.actionBtnText}>Confirm Booking</Text>

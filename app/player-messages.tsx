@@ -6,7 +6,7 @@ import { Animated, Easing, KeyboardAvoidingView, Platform, ScrollView, StyleShee
 import HamburgerMenu from '../components/HamburgerMenu';
 import { useHamburgerMenu } from '../components/HamburgerMenuContext';
 import i18n from '../locales/i18n';
-import { subscribeToConversations, Conversation } from '../services/MessagingService';
+import { subscribeToConversations, Conversation, findAdminUserId, getOrCreateConversation } from '../services/MessagingService';
 import { getChattableUsers, startConversationWithUser } from '../services/BookingMessagingService';
 
 export default function PlayerMessagesScreen() {
@@ -88,6 +88,18 @@ export default function PlayerMessagesScreen() {
               <Text style={styles.headerTitle}>{i18n.t('messages') || 'Messages'}</Text>
               <Text style={styles.headerSubtitle}>{i18n.t('yourConversations') || 'Your conversations'}</Text>
             </View>
+            <TouchableOpacity style={{ position: 'absolute', right: 16, top: Platform.OS === 'ios' ? 60 : 40 }} onPress={async () => {
+              try {
+                const adminId = await findAdminUserId();
+                if (!adminId) { Alert.alert('No admin found'); return; }
+                const convId = await getOrCreateConversation(adminId);
+                router.push({ pathname: '/player-chat', params: { conversationId: convId, otherUserId: adminId, name: 'Admin' } });
+              } catch (err) { console.error(err); }
+            }}>
+              <View style={{ backgroundColor: 'transparent', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }}>
+                <Text style={{ color: '#fff', fontWeight: '600' }}>Text Admin</Text>
+              </View>
+            </TouchableOpacity>
           </View>
 
           <ScrollView 
@@ -275,11 +287,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-  },
-  lastMessageTime: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 4,
   },
   conversationContent: {
     flex: 1,

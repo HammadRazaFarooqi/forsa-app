@@ -17,6 +17,7 @@ import {
   Notification,
   NotificationType,
 } from '../services/NotificationService';
+import { getOrCreateConversation } from '../services/MessagingService';
 import { getCurrentUserRole } from '../services/UserRoleService';
 import { formatTimestamp } from '../lib/dateUtils';
 
@@ -77,6 +78,22 @@ export default function NotificationsScreen() {
       router.push('/academy-bookings' as any);
     } else if (item.type === 'report' && role === 'admin') {
       router.push('/(admin)/reports' as any);
+    } else if ((item.data?.senderId || item.data?.conversationId) && role === 'admin') {
+      try {
+        const senderId = item.data?.senderId;
+        if (senderId) {
+          const senderIdStr = String(senderId);
+          const convId = await getOrCreateConversation(senderIdStr);
+          router.push({ pathname: '/(admin)/user-chat', params: { otherUserId: senderIdStr, name: item.title || 'User' } } as any);
+        } else if (item.data?.conversationId) {
+          const parts = (item.data.conversationId as string).split('_');
+          const current = auth.currentUser?.uid;
+          const other = parts[0] === current ? parts[1] : parts[0];
+          if (other) router.push({ pathname: '/(admin)/user-chat', params: { otherUserId: other, name: item.title || 'User' } } as any);
+        }
+      } catch (e) {
+        console.error('Failed to open chat from notification', e);
+      }
     }
   };
 
