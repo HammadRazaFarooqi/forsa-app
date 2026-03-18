@@ -801,4 +801,13 @@ export default {
   ok: "OK",
   about: "About",
   pleaseSetPriceFirst: "Please set a fee for an age group to schedule it.",
+  accept: "Accept",
+  reject: "Reject",
+  chatToAdmin: "Chat to Admin",
+  timingProposed: "Timing Proposed",
+  accepted: "Accepted",
+  rejected: "Rejected",
+  shiftPreference: "Shift Preference",
+  dayShift: "Day",
+  nightShift: "Night",
 };

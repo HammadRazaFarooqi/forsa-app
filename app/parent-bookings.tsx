@@ -9,6 +9,7 @@ import i18n from '../locales/i18n';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, getDocs, updateDoc, doc, orderBy } from 'firebase/firestore';
 import { startConversationWithUser } from '../services/BookingMessagingService';
+import { findAdminUserId } from '../services/MessagingService';
 
 export default function ParentBookingsScreen() {
   const { openMenu } = useHamburgerMenu();
@@ -125,6 +126,26 @@ export default function ParentBookingsScreen() {
     fetchBookings();
   };
 
+  const handleAcceptTiming = async (bookingId: string) => {
+    try {
+      await updateDoc(doc(db, 'bookings', bookingId), { status: 'player_accepted' });
+      Alert.alert(i18n.t('success') || 'Success', 'Timing accepted successfully');
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'player_accepted' } : b));
+    } catch (err: any) {
+      Alert.alert('Error', 'Failed to accept timing');
+    }
+  };
+
+  const handleRejectTiming = async (bookingId: string) => {
+    try {
+      await updateDoc(doc(db, 'bookings', bookingId), { status: 'player_rejected' });
+      Alert.alert(i18n.t('success') || 'Success', 'Timing rejected successfully');
+      setBookings(prev => prev.map(b => b.id === bookingId ? { ...b, status: 'player_rejected' } : b));
+    } catch (err: any) {
+      Alert.alert('Error', 'Failed to reject timing');
+    }
+  };
+
   const filteredBookings = filter === 'all'
     ? bookings
     : bookings.filter(b => b.type === filter);
@@ -133,9 +154,15 @@ export default function ParentBookingsScreen() {
     switch (status) {
       case 'confirmed':
         return '#10b981';
+      case 'player_accepted':
+        return '#10b981';
       case 'pending':
         return '#f59e0b';
+      case 'timing_proposed':
+        return '#f59e0b';
       case 'cancelled':
+        return '#ef4444';
+      case 'player_rejected':
         return '#ef4444';
       default:
         return '#666';
@@ -146,10 +173,16 @@ export default function ParentBookingsScreen() {
     switch (status) {
       case 'confirmed':
         return i18n.t('confirmed') || 'Confirmed';
+      case 'player_accepted':
+        return i18n.t('accepted') || 'Accepted';
       case 'pending':
         return i18n.t('pending') || 'Pending';
+      case 'timing_proposed':
+        return i18n.t('timingProposed') || 'Timing Proposed';
       case 'cancelled':
         return i18n.t('cancelled') || 'Cancelled';
+      case 'player_rejected':
+        return i18n.t('rejected') || 'Rejected';
       default:
         return status;
     }
@@ -265,19 +298,68 @@ export default function ParentBookingsScreen() {
                     {item.time && (
                       <View style={styles.infoRow}>
                         <Ionicons name="time" size={16} color="#666" />
-                        <Text style={styles.infoText}>{item.time}</Text>
+                        <Text style={styles.infoText}>{item.time} {item.shift ? `(${item.shift === 'Day' ? (i18n.t('dayShift') || 'Day') : (i18n.t('nightShift') || 'Night')})` : ''}</Text>
                       </View>
                     )}
                   </View>
 
                   <View style={styles.cardFooter}>
                     <Text style={styles.priceText}>{item.price} EGP</Text>
-                    {item.status === 'pending' && (
+                    {item.status !== 'cancelled' && item.status !== 'player_rejected' && (
                       <TouchableOpacity style={styles.cancelButton} onPress={() => handleCancelBooking(item.id)}>
                         <Text style={styles.cancelButtonText}>{i18n.t('cancel') || 'Cancel'}</Text>
                       </TouchableOpacity>
                     )}
                   </View>
+
+                  {item.status === 'timing_proposed' && item.proposedByAdmin && (
+                    <View style={{flexDirection: 'row', gap: 12, marginTop: 12}}>
+                      <TouchableOpacity
+                        style={[styles.chatButton, {flex: 1, backgroundColor: '#10b981', marginTop: 0}]}
+                        onPress={() => handleAcceptTiming(item.id)}
+                      >
+                        <Ionicons name="checkmark" size={18} color="#fff" />
+                        <Text style={[styles.chatButtonText, {color: '#fff', marginLeft: 8}]}>{i18n.t('accept') || 'Accept'}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.chatButton, {flex: 1, backgroundColor: '#ef4444', marginTop: 0}]}
+                        onPress={() => handleRejectTiming(item.id)}
+                      >
+                        <Ionicons name="close" size={18} color="#fff" />
+                        <Text style={[styles.chatButtonText, {color: '#fff', marginLeft: 8}]}>{i18n.t('reject') || 'Reject'}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {item.status === 'player_rejected' && (
+                    <TouchableOpacity
+                      style={styles.chatButton}
+                      onPress={async () => {
+                        try {
+                          const adminId = await findAdminUserId();
+                          if (!adminId) {
+                            Alert.alert('Error', 'No admin found');
+                            return;
+                          }
+                          const conversationId = await startConversationWithUser(adminId);
+                          router.push({
+                            pathname: '/academy-chat',
+                            params: {
+                              conversationId,
+                              otherUserId: adminId,
+                              contact: 'Admin'
+                            }
+                          });
+                        } catch (error: any) {
+                          Alert.alert('Error', error.message || 'Failed to start conversation');
+                        }
+                      }}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="chatbubbles" size={18} color="#fff" />
+                      <Text style={[styles.chatButtonText, {color: '#fff', marginLeft: 8}]}>{i18n.t('chatToAdmin') || 'Chat to Admin'}</Text>
+                    </TouchableOpacity>
+                  )}
                   
                   {/* Start Chat Button */}
                   {item.providerId && (
@@ -300,8 +382,8 @@ export default function ParentBookingsScreen() {
                       }}
                       activeOpacity={0.8}
                     >
-                      <Ionicons name="chatbubble-ellipses" size={18} color="#000" />
-                      <Text style={styles.chatButtonText}>{i18n.t('startChat') || 'Start Chat'}</Text>
+                      <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
+                      <Text style={[styles.chatButtonText, {color: '#fff', marginLeft: 8}]}>{i18n.t('startChat') || 'Start Chat'}</Text>
                     </TouchableOpacity>
                   )}
                 </View>

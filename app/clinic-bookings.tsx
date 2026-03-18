@@ -20,6 +20,7 @@ type BookingItem = {
   doctor?: string;
   date?: string;
   time?: string;
+  shift?: 'Day' | 'Night';
   status: string;
   price?: number;
   createdAt?: string;
@@ -193,7 +194,7 @@ export default function ClinicBookingsScreen() {
               contentContainerStyle={styles.scrollContent}
               showsVerticalScrollIndicator={false}
               refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchBookings(); }} tint="#fff" />
+                <RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchBookings(); }} tintColor="#fff" />
               }
             >
               {filteredBookings.length === 0 ? (
@@ -233,7 +234,7 @@ export default function ClinicBookingsScreen() {
                       {booking.time && (
                         <View style={styles.detailRow}>
                           <Ionicons name="time" size={18} color="rgba(255,255,255,0.7)" />
-                          <Text style={styles.detailText}>{booking.time}</Text>
+                          <Text style={styles.detailText}>{booking.time} {booking.shift ? `(${booking.shift === 'Day' ? (i18n.t('dayShift') || 'Day') : (i18n.t('nightShift') || 'Night')})` : ''}</Text>
                         </View>
                       )}
                     </View>

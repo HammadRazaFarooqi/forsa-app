@@ -857,4 +857,13 @@ export default {
   ok: "موافق",
   about: "معلومات عنا",
   pleaseSetPriceFirst: "يرجى تحديد رسوم لفئة عمرية لجدولتها.",
+  accept: "قبول",
+  reject: "رفض",
+  chatToAdmin: "محادثة مع الإدارة",
+  timingProposed: "تم اقتراح موعد",
+  accepted: "مقبول",
+  rejected: "مرفوض",
+  shiftPreference: "فترة الحجز",
+  dayShift: "صباحي",
+  nightShift: "مسائي",
 };

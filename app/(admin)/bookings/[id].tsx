@@ -4,13 +4,14 @@ import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { auth } from '../../../lib/firebase';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../../../lib/firebase';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function BookingDetails() {
     const { id } = useLocalSearchParams();
+    const router = useRouter();
     const [booking, setBooking] = useState<any | null>(null);
     const [loading, setLoading] = useState(true);
     const [showPicker, setShowPicker] = useState(false);
@@ -70,7 +71,8 @@ export default function BookingDetails() {
                 date: datePart,
                 time: timePart,
                 preferredTime: isoTime,
-                proposedByAdmin: true
+                proposedByAdmin: true,
+                status: 'timing_proposed'
             });
             
             setBooking((prev: any) => ({
@@ -78,7 +80,8 @@ export default function BookingDetails() {
                 date: datePart,
                 time: timePart,
                 preferredTime: isoTime,
-                proposedByAdmin: true
+                proposedByAdmin: true,
+                status: 'timing_proposed'
             }));
 
             Alert.alert('Success', 'New timing proposed and updated successfully');
@@ -96,7 +99,10 @@ export default function BookingDetails() {
     const getStatusColor = () => {
         switch (booking.status) {
             case 'confirmed': return '#1cc88a';
+            case 'player_accepted': return '#36b9cc';
             case 'cancelled': return '#e74a3b';
+            case 'player_rejected': return '#e74a3b';
+            case 'timing_proposed': return '#f6c23e';
             default: return '#f6c23e';
         }
     };
@@ -126,12 +132,25 @@ export default function BookingDetails() {
                 />
                 <DetailRow label="Date" value={booking.date} />
                 {booking.time && <DetailRow label="Time" value={booking.time} />}
+                {booking.shift && <DetailRow label="Shift" value={booking.shift} />}
                 <DetailRow label="Price" value={`${booking.price || 0} EGP`} />
                 {booking.doctor && <DetailRow label="Doctor" value={booking.doctor} />}
                 {booking.ageGroup && <DetailRow label="Age Group" value={booking.ageGroup} />}
             </View>
 
             <View style={styles.actionSection}>
+                {(booking.playerId || booking.parentId) && (
+                    <TouchableOpacity 
+                        style={[styles.actionBtn, { backgroundColor: '#36b9cc' }]} 
+                        onPress={() => {
+                            const chatUserId = booking.playerId || booking.parentId;
+                            const chatUserName = booking.customerName || booking.playerName || booking.parentName || 'User';
+                            router.push(`/(admin)/user-chat?otherUserId=${chatUserId}&name=${encodeURIComponent(chatUserName)}`);
+                        }}
+                    >
+                        <Text style={styles.actionBtnText}>Chat with Player/Parent</Text>
+                    </TouchableOpacity>
+                )}
                 <TouchableOpacity style={[styles.actionBtn, { backgroundColor: '#4e73df' }]} onPress={openProposePicker}>
                     <Text style={styles.actionBtnText}>Propose New Time</Text>
                 </TouchableOpacity>
